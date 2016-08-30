@@ -55,7 +55,7 @@ func TestOver65kFiles(t *testing.T) {
 }
 
 func TestModTime(t *testing.T) {
-	var testTime = time.Date(2009, time.November, 10, 23, 45, 58, 0, time.UTC)
+	var testTime = time.Date(2009, time.November, 10, 23, 45, 58, 0, time.Local)
 	fh := new(FileHeader)
 	fh.SetModTime(testTime)
 	outTime := fh.ModTime()

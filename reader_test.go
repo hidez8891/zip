@@ -369,7 +369,7 @@ func readTestFile(t *testing.T, zt ZipTest, ft ZipTestFile, f *File) {
 	}
 
 	if ft.Mtime != "" {
-		mtime, err := time.Parse("01-02-06 15:04:05", ft.Mtime)
+		mtime, err := time.ParseInLocation("01-02-06 15:04:05", ft.Mtime, time.Local)
 		if err != nil {
 			t.Error(err)
 			return
