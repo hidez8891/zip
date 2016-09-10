@@ -129,7 +129,7 @@ func testCreate(t *testing.T, w *Writer, wt *WriteTest) {
 	if wt.Mode != 0 {
 		header.SetMode(wt.Mode)
 	}
-	f, err := w.CreateHeader(header)
+	f, err := w.CreateHeader(header, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func BenchmarkCompressedZipGarbage(b *testing.B) {
 			w, _ := zw.CreateHeader(&FileHeader{
 				Name:   "foo",
 				Method: Deflate,
-			})
+			}, true)
 			w.Write(bigBuf)
 		}
 		zw.Close()

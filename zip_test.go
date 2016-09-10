@@ -29,7 +29,7 @@ func TestOver65kFiles(t *testing.T) {
 		_, err := w.CreateHeader(&FileHeader{
 			Name:   fmt.Sprintf("%d.dat", i),
 			Method: Store, // avoid Issue 6136 and Issue 6138
-		})
+		}, true)
 		if err != nil {
 			t.Fatalf("creating file %d: %v", i, err)
 		}
@@ -259,7 +259,7 @@ func testZip64(t testing.TB, size int64) *rleBuffer {
 	f, err := w.CreateHeader(&FileHeader{
 		Name:   "huge.txt",
 		Method: Store,
-	})
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func testValidHeader(h *FileHeader, t *testing.T) {
 	var buf bytes.Buffer
 	z := NewWriter(&buf)
 
-	f, err := z.CreateHeader(h)
+	f, err := z.CreateHeader(h, true)
 	if err != nil {
 		t.Fatalf("error creating header: %v", err)
 	}

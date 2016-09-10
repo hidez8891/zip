@@ -191,7 +191,7 @@ func (w *Writer) Create(name string) (io.Writer, error) {
 		Name:   name,
 		Method: Deflate,
 	}
-	return w.CreateHeader(header)
+	return w.CreateHeader(header, true)
 }
 
 // CreateHeader adds a file to the zip file using the provided FileHeader
@@ -201,7 +201,7 @@ func (w *Writer) Create(name string) (io.Writer, error) {
 // The file's contents must be written to the io.Writer before the next
 // call to Create, CreateHeader, or Close. The provided FileHeader fh
 // must not be modified after a call to CreateHeader.
-func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
+func (w *Writer) CreateHeader(fh *FileHeader, streamMode bool) (io.Writer, error) {
 	if w.last != nil && !w.last.closed {
 		if err := w.last.close(); err != nil {
 			return nil, err
@@ -212,8 +212,9 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 		return nil, errors.New("archive/zip: invalid duplicate FileHeader")
 	}
 
-	// TODO
-	fh.Flags |= 0x8 // we will write a data descriptor
+	if streamMode {
+		fh.Flags |= 0x8 // we will write a data descriptor
+	}
 
 	fh.CreatorVersion = fh.CreatorVersion&0xff00 | zipVersion20 // preserve compatibility byte
 	fh.ReaderVersion = zipVersion20
@@ -236,31 +237,6 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 	w.dir = append(w.dir, h)
 	w.last = fw
 	return fw, nil
-}
-
-func writeHeader(w io.Writer, h *FileHeader) error {
-	var buf [fileHeaderLen]byte
-	b := writeBuf(buf[:])
-	b.uint32(uint32(fileHeaderSignature))
-	b.uint16(h.ReaderVersion)
-	b.uint16(h.Flags)
-	b.uint16(h.Method)
-	b.uint16(h.ModifiedTime)
-	b.uint16(h.ModifiedDate)
-	// TODO
-	b.uint32(0) // since we are writing a data descriptor crc32,
-	b.uint32(0) // compressed size,
-	b.uint32(0) // and uncompressed size should be zero
-	b.uint16(uint16(len(h.Name)))
-	b.uint16(uint16(len(h.Extra)))
-	if _, err := w.Write(buf[:]); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(w, h.Name); err != nil {
-		return err
-	}
-	_, err := w.Write(h.Extra)
-	return err
 }
 
 // RegisterCompressor registers or overrides a custom compressor for a specific
@@ -323,7 +299,7 @@ func newFileWriter(zipw io.Writer, h *header, comp Compressor, cacheMode bool) (
 
 	// write FileHeader (only no cacheMode)
 	if fw.cacheMode == false {
-		if err := writeHeader(zipw, h.FileHeader); err != nil {
+		if err := fw.writeHeader(h.FileHeader); err != nil {
 			return nil, err
 		}
 	}
@@ -374,7 +350,7 @@ func (w *fileWriter) close() error {
 
 	if w.cacheMode {
 		// write FileHeader (only cacheMode)
-		if err := writeHeader(w.zipw, fh); err != nil {
+		if err := w.writeHeader(fh); err != nil {
 			return err
 		}
 
@@ -392,24 +368,54 @@ func (w *fileWriter) close() error {
 	// http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=7073588.
 	// The approach here is to write 8 byte sizes if needed without
 	// adding a zip64 extra in the local header (too late anyway).
-	var buf []byte
-	if fh.isZip64() {
-		buf = make([]byte, dataDescriptor64Len)
-	} else {
-		buf = make([]byte, dataDescriptorLen)
+	if fh.hasDataDescriptor() {
+		var buf []byte
+		if fh.isZip64() {
+			buf = make([]byte, dataDescriptor64Len)
+		} else {
+			buf = make([]byte, dataDescriptorLen)
+		}
+		b := writeBuf(buf)
+		// TODO
+		b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
+		b.uint32(fh.CRC32)
+		if fh.isZip64() {
+			b.uint64(fh.CompressedSize64)
+			b.uint64(fh.UncompressedSize64)
+		} else {
+			b.uint32(fh.CompressedSize)
+			b.uint32(fh.UncompressedSize)
+		}
+		_, err := w.zipw.Write(buf)
+		if err != nil {
+			return err
+		}
 	}
-	b := writeBuf(buf)
-	// TODO
-	b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
-	b.uint32(fh.CRC32)
-	if fh.isZip64() {
-		b.uint64(fh.CompressedSize64)
-		b.uint64(fh.UncompressedSize64)
-	} else {
-		b.uint32(fh.CompressedSize)
-		b.uint32(fh.UncompressedSize)
+
+	return nil
+}
+
+func (w *fileWriter) writeHeader(h *FileHeader) error {
+	var buf [fileHeaderLen]byte
+	b := writeBuf(buf[:])
+	b.uint32(uint32(fileHeaderSignature))
+	b.uint16(h.ReaderVersion)
+	b.uint16(h.Flags)
+	b.uint16(h.Method)
+	b.uint16(h.ModifiedTime)
+	b.uint16(h.ModifiedDate)
+	b.uint32(0) // since we are writing a data descriptor crc32,
+	b.uint32(0) // compressed size,
+	b.uint32(0) // and uncompressed size should be zero
+	b.uint16(uint16(len(h.Name)))
+	b.uint16(uint16(len(h.Extra)))
+	if _, err := w.zipw.Write(buf[:]); err != nil {
+		return err
 	}
-	_, err := w.zipw.Write(buf)
+	if _, err := io.WriteString(w.zipw, h.Name); err != nil {
+		return err
+	}
+	_, err := w.zipw.Write(h.Extra)
 	return err
 }
 
