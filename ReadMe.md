@@ -3,7 +3,7 @@ Fix and update Go's archive/zip
 ### tasks
 
 - [x] fix file/directory datatime
-- [ ] support no-data-descriptor format
+- [x] support no-data-descriptor format
 - [ ] add existing zip file updater
 
 ### history
