@@ -210,11 +210,13 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 		return nil, errors.New("archive/zip: invalid duplicate FileHeader")
 	}
 
+	// TODO
 	fh.Flags |= 0x8 // we will write a data descriptor
 
 	fh.CreatorVersion = fh.CreatorVersion&0xff00 | zipVersion20 // preserve compatibility byte
 	fh.ReaderVersion = zipVersion20
 
+	// TODO change file writer ?
 	fw := &fileWriter{
 		zipw:      w.cw,
 		compCount: &countWriter{w: w.cw},
@@ -238,7 +240,7 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 	w.dir = append(w.dir, h)
 	fw.header = h
 
-	if err := writeHeader(w.cw, fh); err != nil {
+	if err := writeHeader(w.cw, fh); err != nil { // TODO
 		return nil, err
 	}
 
@@ -255,6 +257,7 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 	b.uint16(h.Method)
 	b.uint16(h.ModifiedTime)
 	b.uint16(h.ModifiedDate)
+	// TODO
 	b.uint32(0) // since we are writing a data descriptor crc32,
 	b.uint32(0) // compressed size,
 	b.uint32(0) // and uncompressed size should be zero
@@ -322,6 +325,7 @@ func (w *fileWriter) close() error {
 	fh.UncompressedSize64 = uint64(w.rawCount.count)
 
 	if fh.isZip64() {
+		// TODO add descriptor
 		fh.CompressedSize = uint32max
 		fh.UncompressedSize = uint32max
 		fh.ReaderVersion = zipVersion45 // requires 4.5 - File uses ZIP64 format extensions
@@ -342,6 +346,7 @@ func (w *fileWriter) close() error {
 		buf = make([]byte, dataDescriptorLen)
 	}
 	b := writeBuf(buf)
+	// TODO
 	b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
 	b.uint32(fh.CRC32)
 	if fh.isZip64() {
