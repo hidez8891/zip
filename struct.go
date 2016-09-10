@@ -238,6 +238,11 @@ func (fh *FileHeader) isZip64() bool {
 	return fh.CompressedSize64 >= uint32max || fh.UncompressedSize64 >= uint32max
 }
 
+// hasDataDescriptor reports the file has data descriptor block
+func (fh *FileHeader) hasDataDescriptor() bool {
+	return fh.Flags&0x08 != 0
+}
+
 func msdosModeToFileMode(m uint32) (mode os.FileMode) {
 	if m&msdosDir != 0 {
 		mode = os.ModeDir | 0777

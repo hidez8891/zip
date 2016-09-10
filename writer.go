@@ -11,6 +11,8 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"io/ioutil"
+	"os"
 )
 
 // TODO(adg): support zip file comments
@@ -216,34 +218,22 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 	fh.CreatorVersion = fh.CreatorVersion&0xff00 | zipVersion20 // preserve compatibility byte
 	fh.ReaderVersion = zipVersion20
 
-	// TODO change file writer ?
-	fw := &fileWriter{
-		zipw:      w.cw,
-		compCount: &countWriter{w: w.cw},
-		crc32:     crc32.NewIEEE(),
-	}
-	comp := w.compressor(fh.Method)
-	if comp == nil {
-		return nil, ErrAlgorithm
-	}
-	var err error
-	fw.comp, err = comp(fw.compCount)
-	if err != nil {
-		return nil, err
-	}
-	fw.rawCount = &countWriter{w: fw.comp}
-
 	h := &header{
 		FileHeader: fh,
 		offset:     uint64(w.cw.count),
 	}
-	w.dir = append(w.dir, h)
-	fw.header = h
 
-	if err := writeHeader(w.cw, fh); err != nil { // TODO
+	comp := w.compressor(fh.Method)
+	if comp == nil {
+		return nil, ErrAlgorithm
+	}
+
+	fw, err := newFileWriter(w.cw, h, comp, !fh.hasDataDescriptor())
+	if err != nil {
 		return nil, err
 	}
 
+	w.dir = append(w.dir, h)
 	w.last = fw
 	return fw, nil
 }
@@ -299,6 +289,46 @@ type fileWriter struct {
 	compCount *countWriter
 	crc32     hash.Hash32
 	closed    bool
+	cacheMode bool
+	cacheFile *os.File
+}
+
+func newFileWriter(zipw io.Writer, h *header, comp Compressor, cacheMode bool) (*fileWriter, error) {
+	fw := &fileWriter{
+		zipw:      zipw,
+		crc32:     crc32.NewIEEE(),
+		cacheMode: cacheMode,
+	}
+
+	if fw.cacheMode {
+		tmpfile, err := ioutil.TempFile("", "temp_zip")
+		if err != nil {
+			return nil, err
+		}
+
+		fw.compCount = &countWriter{w: tmpfile}
+		fw.cacheFile = tmpfile
+	} else {
+		fw.compCount = &countWriter{w: zipw}
+	}
+
+	var err error
+	fw.comp, err = comp(fw.compCount)
+	if err != nil {
+		return nil, err
+	}
+
+	fw.rawCount = &countWriter{w: fw.comp}
+	fw.header = h
+
+	// write FileHeader (only no cacheMode)
+	if fw.cacheMode == false {
+		if err := writeHeader(zipw, h.FileHeader); err != nil {
+			return nil, err
+		}
+	}
+
+	return fw, nil
 }
 
 func (w *fileWriter) Write(p []byte) (int, error) {
@@ -314,6 +344,14 @@ func (w *fileWriter) close() error {
 		return errors.New("zip: file closed twice")
 	}
 	w.closed = true
+
+	defer func() {
+		if w.cacheMode {
+			w.cacheFile.Close()
+			os.Remove(w.cacheFile.Name())
+		}
+	}()
+
 	if err := w.comp.Close(); err != nil {
 		return err
 	}
@@ -332,6 +370,21 @@ func (w *fileWriter) close() error {
 	} else {
 		fh.CompressedSize = uint32(fh.CompressedSize64)
 		fh.UncompressedSize = uint32(fh.UncompressedSize64)
+	}
+
+	if w.cacheMode {
+		// write FileHeader (only cacheMode)
+		if err := writeHeader(w.zipw, fh); err != nil {
+			return err
+		}
+
+		// copy cache to zip writer
+		if _, err := w.cacheFile.Seek(0, 0); err != nil {
+			return err
+		}
+		if _, err := io.Copy(w.zipw, w.cacheFile); err != nil {
+			return err
+		}
 	}
 
 	// Write data descriptor. This is more complicated than one would
