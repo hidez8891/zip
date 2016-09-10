@@ -22,33 +22,35 @@ func TestOver65kFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in short mode")
 	}
-	buf := new(bytes.Buffer)
-	w := NewWriter(buf)
-	const nFiles = (1 << 16) + 42
-	for i := 0; i < nFiles; i++ {
-		_, err := w.CreateHeader(&FileHeader{
-			Name:   fmt.Sprintf("%d.dat", i),
-			Method: Store, // avoid Issue 6136 and Issue 6138
-		}, true)
-		if err != nil {
-			t.Fatalf("creating file %d: %v", i, err)
+	for _, streamMode := range []bool{true, false} {
+		buf := new(bytes.Buffer)
+		w := NewWriter(buf)
+		const nFiles = (1 << 16) + 42
+		for i := 0; i < nFiles; i++ {
+			_, err := w.CreateHeader(&FileHeader{
+				Name:   fmt.Sprintf("%d.dat", i),
+				Method: Store, // avoid Issue 6136 and Issue 6138
+			}, streamMode)
+			if err != nil {
+				t.Fatalf("creating file %d: %v", i, err)
+			}
 		}
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Writer.Close: %v", err)
-	}
-	s := buf.String()
-	zr, err := NewReader(strings.NewReader(s), int64(len(s)))
-	if err != nil {
-		t.Fatalf("NewReader: %v", err)
-	}
-	if got := len(zr.File); got != nFiles {
-		t.Fatalf("File contains %d files, want %d", got, nFiles)
-	}
-	for i := 0; i < nFiles; i++ {
-		want := fmt.Sprintf("%d.dat", i)
-		if zr.File[i].Name != want {
-			t.Fatalf("File(%d) = %q, want %q", i, zr.File[i].Name, want)
+		if err := w.Close(); err != nil {
+			t.Fatalf("Writer.Close: %v", err)
+		}
+		s := buf.String()
+		zr, err := NewReader(strings.NewReader(s), int64(len(s)))
+		if err != nil {
+			t.Fatalf("NewReader: %v", err)
+		}
+		if got := len(zr.File); got != nFiles {
+			t.Fatalf("File contains %d files, want %d", got, nFiles)
+		}
+		for i := 0; i < nFiles; i++ {
+			want := fmt.Sprintf("%d.dat", i)
+			if zr.File[i].Name != want {
+				t.Fatalf("File(%d) = %q, want %q", i, zr.File[i].Name, want)
+			}
 		}
 	}
 }
@@ -232,8 +234,10 @@ func TestZip64(t *testing.T) {
 		t.Skip("slow test; skipping")
 	}
 	const size = 1 << 32 // before the "END\n" part
-	buf := testZip64(t, size)
-	testZip64DirectoryRecordLength(buf, t)
+	for _, streamMode := range []bool{true, false} {
+		buf := testZip64(t, size, streamMode)
+		testZip64DirectoryRecordLength(buf, t)
+	}
 }
 
 func TestZip64EdgeCase(t *testing.T) {
@@ -246,11 +250,13 @@ func TestZip64EdgeCase(t *testing.T) {
 	// Go 1.5 and earlier got this wrong,
 	// writing an invalid zip file.
 	const size = 1<<32 - 1 - int64(len("END\n")) // before the "END\n" part
-	buf := testZip64(t, size)
-	testZip64DirectoryRecordLength(buf, t)
+	for _, streamMode := range []bool{true, false} {
+		buf := testZip64(t, size, streamMode)
+		testZip64DirectoryRecordLength(buf, t)
+	}
 }
 
-func testZip64(t testing.TB, size int64) *rleBuffer {
+func testZip64(t testing.TB, size int64, streamMode bool) *rleBuffer {
 	const chunkSize = 1024
 	chunks := int(size / chunkSize)
 	// write size bytes plus "END\n" to a zip file
@@ -259,7 +265,7 @@ func testZip64(t testing.TB, size int64) *rleBuffer {
 	f, err := w.CreateHeader(&FileHeader{
 		Name:   "huge.txt",
 		Method: Store,
-	}, true)
+	}, streamMode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,28 +372,30 @@ func testZip64DirectoryRecordLength(buf *rleBuffer, t *testing.T) {
 }
 
 func testValidHeader(h *FileHeader, t *testing.T) {
-	var buf bytes.Buffer
-	z := NewWriter(&buf)
+	for _, streamMode := range []bool{true, false} {
+		var buf bytes.Buffer
+		z := NewWriter(&buf)
 
-	f, err := z.CreateHeader(h, true)
-	if err != nil {
-		t.Fatalf("error creating header: %v", err)
-	}
-	if _, err := f.Write([]byte("hi")); err != nil {
-		t.Fatalf("error writing content: %v", err)
-	}
-	if err := z.Close(); err != nil {
-		t.Fatalf("error closing zip writer: %v", err)
-	}
+		f, err := z.CreateHeader(h, streamMode)
+		if err != nil {
+			t.Fatalf("error creating header: %v", err)
+		}
+		if _, err := f.Write([]byte("hi")); err != nil {
+			t.Fatalf("error writing content: %v", err)
+		}
+		if err := z.Close(); err != nil {
+			t.Fatalf("error closing zip writer: %v", err)
+		}
 
-	b := buf.Bytes()
-	zf, err := NewReader(bytes.NewReader(b), int64(len(b)))
-	if err != nil {
-		t.Fatalf("got %v, expected nil", err)
-	}
-	zh := zf.File[0].FileHeader
-	if zh.Name != h.Name || zh.Method != h.Method || zh.UncompressedSize64 != uint64(len("hi")) {
-		t.Fatalf("got %q/%d/%d expected %q/%d/%d", zh.Name, zh.Method, zh.UncompressedSize64, h.Name, h.Method, len("hi"))
+		b := buf.Bytes()
+		zf, err := NewReader(bytes.NewReader(b), int64(len(b)))
+		if err != nil {
+			t.Fatalf("got %v, expected nil", err)
+		}
+		zh := zf.File[0].FileHeader
+		if zh.Name != h.Name || zh.Method != h.Method || zh.UncompressedSize64 != uint64(len("hi")) {
+			t.Fatalf("got %q/%d/%d expected %q/%d/%d", zh.Name, zh.Method, zh.UncompressedSize64, h.Name, h.Method, len("hi"))
+		}
 	}
 }
 
@@ -444,6 +452,6 @@ func TestZeroLengthHeader(t *testing.T) {
 // our zip performance, since the test above disabled CRC32 and flate.
 func BenchmarkZip64Test(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		testZip64(b, 1<<26)
+		testZip64(b, 1<<26, true)
 	}
 }
