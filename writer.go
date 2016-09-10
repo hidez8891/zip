@@ -376,7 +376,6 @@ func (w *fileWriter) close() error {
 			buf = make([]byte, dataDescriptorLen)
 		}
 		b := writeBuf(buf)
-		// TODO
 		b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
 		b.uint32(fh.CRC32)
 		if fh.isZip64() {
@@ -404,9 +403,15 @@ func (w *fileWriter) writeHeader(h *FileHeader) error {
 	b.uint16(h.Method)
 	b.uint16(h.ModifiedTime)
 	b.uint16(h.ModifiedDate)
-	b.uint32(0) // since we are writing a data descriptor crc32,
-	b.uint32(0) // compressed size,
-	b.uint32(0) // and uncompressed size should be zero
+	if w.hasDataDescriptor() {
+		b.uint32(0)
+		b.uint32(0)
+		b.uint32(0)
+	} else {
+		b.uint32(h.CRC32)
+		b.uint32(h.CompressedSize)
+		b.uint32(h.UncompressedSize)
+	}
 	b.uint16(uint16(len(h.Name)))
 	b.uint16(uint16(len(h.Extra)))
 	if _, err := w.zipw.Write(buf[:]); err != nil {
