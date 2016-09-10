@@ -6,7 +6,6 @@ package zip
 
 import (
 	"bytes"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -56,91 +55,77 @@ var writeTests = []WriteTest{
 }
 
 func TestWriter(t *testing.T) {
-	largeData := make([]byte, 1<<17)
-	for i := range largeData {
-		largeData[i] = byte(rand.Int())
-	}
-	writeTests[1].Data = largeData
-	defer func() {
-		writeTests[1].Data = nil
-	}()
+	for _, streamMode := range []bool{true, false} {
+		largeData := make([]byte, 1<<17)
+		for i := range largeData {
+			largeData[i] = byte(rand.Int())
+		}
+		writeTests[1].Data = largeData
+		defer func() {
+			writeTests[1].Data = nil
+		}()
 
-	// write a zip file
-	buf := new(bytes.Buffer)
-	w := NewWriter(buf)
+		// write a zip file
+		buf := new(bytes.Buffer)
+		w := NewWriter(buf)
 
-	for _, wt := range writeTests {
-		testCreate(t, w, &wt)
-	}
+		for _, wt := range writeTests {
+			testCreate(t, w, &wt, streamMode)
+		}
 
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
 
-	// read it back
-	r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, wt := range writeTests {
-		testReadFile(t, r.File[i], &wt)
+		// read it back
+		r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, wt := range writeTests {
+			testReadFile(t, r.File[i], &wt)
+		}
 	}
 }
 
 func TestWriterOffset(t *testing.T) {
-	largeData := make([]byte, 1<<17)
-	for i := range largeData {
-		largeData[i] = byte(rand.Int())
-	}
-	writeTests[1].Data = largeData
-	defer func() {
-		writeTests[1].Data = nil
-	}()
+	for _, streamMode := range []bool{true, false} {
+		largeData := make([]byte, 1<<17)
+		for i := range largeData {
+			largeData[i] = byte(rand.Int())
+		}
+		writeTests[1].Data = largeData
+		defer func() {
+			writeTests[1].Data = nil
+		}()
 
-	// write a zip file
-	buf := new(bytes.Buffer)
-	existingData := []byte{1, 2, 3, 1, 2, 3, 1, 2, 3}
-	n, _ := buf.Write(existingData)
-	w := NewWriter(buf)
-	w.SetOffset(int64(n))
+		// write a zip file
+		buf := new(bytes.Buffer)
+		existingData := []byte{1, 2, 3, 1, 2, 3, 1, 2, 3}
+		n, _ := buf.Write(existingData)
+		w := NewWriter(buf)
+		w.SetOffset(int64(n))
 
-	for _, wt := range writeTests {
-		testCreate(t, w, &wt)
-	}
+		for _, wt := range writeTests {
+			testCreate(t, w, &wt, streamMode)
+		}
 
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
 
-	// read it back
-	r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, wt := range writeTests {
-		testReadFile(t, r.File[i], &wt)
+		// read it back
+		r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, wt := range writeTests {
+			testReadFile(t, r.File[i], &wt)
+		}
 	}
 }
 
-func TestWriterFlush(t *testing.T) {
-	var buf bytes.Buffer
-	w := NewWriter(struct{ io.Writer }{&buf})
-	_, err := w.Create("foo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if buf.Len() > 0 {
-		t.Fatalf("Unexpected %d bytes already in buffer", buf.Len())
-	}
-	if err := w.Flush(); err != nil {
-		t.Fatal(err)
-	}
-	if buf.Len() == 0 {
-		t.Fatal("No bytes written after Flush")
-	}
-}
-
-func testCreate(t *testing.T, w *Writer, wt *WriteTest) {
+func testCreate(t *testing.T, w *Writer, wt *WriteTest, streamMode bool) {
 	header := &FileHeader{
 		Name:   wt.Name,
 		Method: wt.Method,
@@ -148,7 +133,7 @@ func testCreate(t *testing.T, w *Writer, wt *WriteTest) {
 	if wt.Mode != 0 {
 		header.SetMode(wt.Mode)
 	}
-	f, err := w.CreateHeader(header)
+	f, err := w.CreateHeader(header, streamMode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +176,7 @@ func BenchmarkCompressedZipGarbage(b *testing.B) {
 			w, _ := zw.CreateHeader(&FileHeader{
 				Name:   "foo",
 				Method: Deflate,
-			})
+			}, true)
 			w.Write(bigBuf)
 		}
 		zw.Close()

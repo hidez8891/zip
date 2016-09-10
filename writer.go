@@ -11,6 +11,8 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"io/ioutil"
+	"os"
 )
 
 // TODO(adg): support zip file comments
@@ -184,12 +186,12 @@ func (w *Writer) Close() error {
 // allowed.
 // The file's contents must be written to the io.Writer before the next
 // call to Create, CreateHeader, or Close.
-func (w *Writer) Create(name string) (io.Writer, error) {
+func (w *Writer) Create(name string, streamMode bool) (io.Writer, error) {
 	header := &FileHeader{
 		Name:   name,
 		Method: Deflate,
 	}
-	return w.CreateHeader(header)
+	return w.CreateHeader(header, streamMode)
 }
 
 // CreateHeader adds a file to the zip file using the provided FileHeader
@@ -199,7 +201,7 @@ func (w *Writer) Create(name string) (io.Writer, error) {
 // The file's contents must be written to the io.Writer before the next
 // call to Create, CreateHeader, or Close. The provided FileHeader fh
 // must not be modified after a call to CreateHeader.
-func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
+func (w *Writer) CreateHeader(fh *FileHeader, streamMode bool) (io.Writer, error) {
 	if w.last != nil && !w.last.closed {
 		if err := w.last.close(); err != nil {
 			return nil, err
@@ -210,64 +212,31 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 		return nil, errors.New("archive/zip: invalid duplicate FileHeader")
 	}
 
-	fh.Flags |= 0x8 // we will write a data descriptor
+	if streamMode {
+		fh.Flags |= 0x8 // we will write a data descriptor
+	}
 
 	fh.CreatorVersion = fh.CreatorVersion&0xff00 | zipVersion20 // preserve compatibility byte
 	fh.ReaderVersion = zipVersion20
-
-	fw := &fileWriter{
-		zipw:      w.cw,
-		compCount: &countWriter{w: w.cw},
-		crc32:     crc32.NewIEEE(),
-	}
-	comp := w.compressor(fh.Method)
-	if comp == nil {
-		return nil, ErrAlgorithm
-	}
-	var err error
-	fw.comp, err = comp(fw.compCount)
-	if err != nil {
-		return nil, err
-	}
-	fw.rawCount = &countWriter{w: fw.comp}
 
 	h := &header{
 		FileHeader: fh,
 		offset:     uint64(w.cw.count),
 	}
-	w.dir = append(w.dir, h)
-	fw.header = h
 
-	if err := writeHeader(w.cw, fh); err != nil {
+	comp := w.compressor(fh.Method)
+	if comp == nil {
+		return nil, ErrAlgorithm
+	}
+
+	fw, err := newFileWriter(w.cw, h, comp, !fh.hasDataDescriptor())
+	if err != nil {
 		return nil, err
 	}
 
+	w.dir = append(w.dir, h)
 	w.last = fw
 	return fw, nil
-}
-
-func writeHeader(w io.Writer, h *FileHeader) error {
-	var buf [fileHeaderLen]byte
-	b := writeBuf(buf[:])
-	b.uint32(uint32(fileHeaderSignature))
-	b.uint16(h.ReaderVersion)
-	b.uint16(h.Flags)
-	b.uint16(h.Method)
-	b.uint16(h.ModifiedTime)
-	b.uint16(h.ModifiedDate)
-	b.uint32(0) // since we are writing a data descriptor crc32,
-	b.uint32(0) // compressed size,
-	b.uint32(0) // and uncompressed size should be zero
-	b.uint16(uint16(len(h.Name)))
-	b.uint16(uint16(len(h.Extra)))
-	if _, err := w.Write(buf[:]); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(w, h.Name); err != nil {
-		return err
-	}
-	_, err := w.Write(h.Extra)
-	return err
 }
 
 // RegisterCompressor registers or overrides a custom compressor for a specific
@@ -296,6 +265,46 @@ type fileWriter struct {
 	compCount *countWriter
 	crc32     hash.Hash32
 	closed    bool
+	cacheMode bool
+	cacheFile *os.File
+}
+
+func newFileWriter(zipw io.Writer, h *header, comp Compressor, cacheMode bool) (*fileWriter, error) {
+	fw := &fileWriter{
+		zipw:      zipw,
+		crc32:     crc32.NewIEEE(),
+		cacheMode: cacheMode,
+	}
+
+	if fw.cacheMode {
+		tmpfile, err := ioutil.TempFile("", "temp_zip")
+		if err != nil {
+			return nil, err
+		}
+
+		fw.compCount = &countWriter{w: tmpfile}
+		fw.cacheFile = tmpfile
+	} else {
+		fw.compCount = &countWriter{w: zipw}
+	}
+
+	var err error
+	fw.comp, err = comp(fw.compCount)
+	if err != nil {
+		return nil, err
+	}
+
+	fw.rawCount = &countWriter{w: fw.comp}
+	fw.header = h
+
+	// write FileHeader (only no cacheMode)
+	if fw.cacheMode == false {
+		if err := fw.writeHeader(h.FileHeader); err != nil {
+			return nil, err
+		}
+	}
+
+	return fw, nil
 }
 
 func (w *fileWriter) Write(p []byte) (int, error) {
@@ -311,6 +320,14 @@ func (w *fileWriter) close() error {
 		return errors.New("zip: file closed twice")
 	}
 	w.closed = true
+
+	defer func() {
+		if w.cacheMode {
+			w.cacheFile.Close()
+			os.Remove(w.cacheFile.Name())
+		}
+	}()
+
 	if err := w.comp.Close(); err != nil {
 		return err
 	}
@@ -325,9 +342,25 @@ func (w *fileWriter) close() error {
 		fh.CompressedSize = uint32max
 		fh.UncompressedSize = uint32max
 		fh.ReaderVersion = zipVersion45 // requires 4.5 - File uses ZIP64 format extensions
+		fh.Flags |= 0x8                 // require  data descriptor
 	} else {
 		fh.CompressedSize = uint32(fh.CompressedSize64)
 		fh.UncompressedSize = uint32(fh.UncompressedSize64)
+	}
+
+	if w.cacheMode {
+		// write FileHeader (only cacheMode)
+		if err := w.writeHeader(fh); err != nil {
+			return err
+		}
+
+		// copy cache to zip writer
+		if _, err := w.cacheFile.Seek(0, 0); err != nil {
+			return err
+		}
+		if _, err := io.Copy(w.zipw, w.cacheFile); err != nil {
+			return err
+		}
 	}
 
 	// Write data descriptor. This is more complicated than one would
@@ -335,23 +368,59 @@ func (w *fileWriter) close() error {
 	// http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=7073588.
 	// The approach here is to write 8 byte sizes if needed without
 	// adding a zip64 extra in the local header (too late anyway).
-	var buf []byte
-	if fh.isZip64() {
-		buf = make([]byte, dataDescriptor64Len)
-	} else {
-		buf = make([]byte, dataDescriptorLen)
+	if fh.hasDataDescriptor() {
+		var buf []byte
+		if fh.isZip64() {
+			buf = make([]byte, dataDescriptor64Len)
+		} else {
+			buf = make([]byte, dataDescriptorLen)
+		}
+		b := writeBuf(buf)
+		b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
+		b.uint32(fh.CRC32)
+		if fh.isZip64() {
+			b.uint64(fh.CompressedSize64)
+			b.uint64(fh.UncompressedSize64)
+		} else {
+			b.uint32(fh.CompressedSize)
+			b.uint32(fh.UncompressedSize)
+		}
+		_, err := w.zipw.Write(buf)
+		if err != nil {
+			return err
+		}
 	}
-	b := writeBuf(buf)
-	b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
-	b.uint32(fh.CRC32)
-	if fh.isZip64() {
-		b.uint64(fh.CompressedSize64)
-		b.uint64(fh.UncompressedSize64)
+
+	return nil
+}
+
+func (w *fileWriter) writeHeader(h *FileHeader) error {
+	var buf [fileHeaderLen]byte
+	b := writeBuf(buf[:])
+	b.uint32(uint32(fileHeaderSignature))
+	b.uint16(h.ReaderVersion)
+	b.uint16(h.Flags)
+	b.uint16(h.Method)
+	b.uint16(h.ModifiedTime)
+	b.uint16(h.ModifiedDate)
+	if w.hasDataDescriptor() {
+		b.uint32(0)
+		b.uint32(0)
+		b.uint32(0)
 	} else {
-		b.uint32(fh.CompressedSize)
-		b.uint32(fh.UncompressedSize)
+		b.uint32(h.CRC32)
+		b.uint32(h.CompressedSize)
+		b.uint32(h.UncompressedSize)
 	}
-	_, err := w.zipw.Write(buf)
+	b.uint16(uint16(len(h.Name)))
+	b.uint16(uint16(len(h.Extra)))
+	if _, err := w.zipw.Write(buf[:]); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w.zipw, h.Name); err != nil {
+		return err
+	}
+	_, err := w.zipw.Write(h.Extra)
 	return err
 }
 
