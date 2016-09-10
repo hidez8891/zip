@@ -186,12 +186,12 @@ func (w *Writer) Close() error {
 // allowed.
 // The file's contents must be written to the io.Writer before the next
 // call to Create, CreateHeader, or Close.
-func (w *Writer) Create(name string) (io.Writer, error) {
+func (w *Writer) Create(name string, streamMode bool) (io.Writer, error) {
 	header := &FileHeader{
 		Name:   name,
 		Method: Deflate,
 	}
-	return w.CreateHeader(header, true)
+	return w.CreateHeader(header, streamMode)
 }
 
 // CreateHeader adds a file to the zip file using the provided FileHeader
