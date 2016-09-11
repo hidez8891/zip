@@ -154,12 +154,11 @@ func (f *File) DataOffset() (offset int64, err error) {
 // Open returns a ReadCloser that provides access to the File's contents.
 // Multiple files may be read concurrently.
 func (f *File) Open() (io.ReadCloser, error) {
-	bodyOffset, err := f.findBodyOffset()
+	r, err := f.bodyReader()
 	if err != nil {
 		return nil, err
 	}
-	size := int64(f.CompressedSize64)
-	r := io.NewSectionReader(f.zipr, f.headerOffset+bodyOffset, size)
+
 	dcomp := f.zip.decompressor(f.Method)
 	if dcomp == nil {
 		return nil, ErrAlgorithm
@@ -167,6 +166,11 @@ func (f *File) Open() (io.ReadCloser, error) {
 	var rc io.ReadCloser = dcomp(r)
 	var desr io.Reader
 	if f.hasDataDescriptor() {
+		bodyOffset, err := f.findBodyOffset()
+		if err != nil {
+			return nil, err
+		}
+		size := int64(f.CompressedSize64)
 		desr = io.NewSectionReader(f.zipr, f.headerOffset+bodyOffset+size, dataDescriptorLen)
 	}
 	rc = &checksumReader{
@@ -176,6 +180,16 @@ func (f *File) Open() (io.ReadCloser, error) {
 		desr: desr,
 	}
 	return rc, nil
+}
+
+func (f *File) bodyReader() (io.Reader, error) {
+	bodyOffset, err := f.findBodyOffset()
+	if err != nil {
+		return nil, err
+	}
+	size := int64(f.CompressedSize64)
+	r := io.NewSectionReader(f.zipr, f.headerOffset+bodyOffset, size)
+	return r, nil
 }
 
 type checksumReader struct {

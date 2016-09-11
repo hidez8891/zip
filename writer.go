@@ -239,6 +239,40 @@ func (w *Writer) CreateHeader(fh *FileHeader, streamMode bool) (io.Writer, error
 	return fw, nil
 }
 
+func (w *Writer) addFile(f *File) error {
+	if w.last != nil && !w.last.closed {
+		if err := w.last.close(); err != nil {
+			return err
+		}
+	}
+	fh := &f.FileHeader
+	h := &header{
+		FileHeader: fh,
+		offset:     uint64(w.cw.count),
+	}
+	w.dir = append(w.dir, h)
+	w.last = nil
+
+	body, err := f.bodyReader()
+	if err != nil {
+		return err
+	}
+
+	if err := writeHeader(w.cw, fh); err != nil {
+		return err
+	}
+	if _, err := io.Copy(w.cw, body); err != nil {
+		return err
+	}
+	if h.hasDataDescriptor() {
+		if err := writeDataDescriptor(w.cw, fh); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // RegisterCompressor registers or overrides a custom compressor for a specific
 // method ID. If a compressor for a given method is not found, Writer will
 // default to looking up the compressor at the package level.
