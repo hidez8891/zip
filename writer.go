@@ -403,7 +403,7 @@ func (w *fileWriter) writeHeader(h *FileHeader) error {
 	b.uint16(h.Method)
 	b.uint16(h.ModifiedTime)
 	b.uint16(h.ModifiedDate)
-	if w.hasDataDescriptor() {
+	if h.hasDataDescriptor() {
 		b.uint32(0)
 		b.uint32(0)
 		b.uint32(0)
