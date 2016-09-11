@@ -369,7 +369,9 @@ func (w *fileWriter) close() error {
 	// The approach here is to write 8 byte sizes if needed without
 	// adding a zip64 extra in the local header (too late anyway).
 	if fh.hasDataDescriptor() {
-		writeDataDescriptor(w.zipw, fh)
+		if err := writeDataDescriptor(w.zipw, fh); err != nil {
+			return err
+		}
 	}
 
 	return nil
