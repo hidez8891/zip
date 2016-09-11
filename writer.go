@@ -299,7 +299,7 @@ func newFileWriter(zipw io.Writer, h *header, comp Compressor, cacheMode bool) (
 
 	// write FileHeader (only no cacheMode)
 	if fw.cacheMode == false {
-		if err := fw.writeHeader(h.FileHeader); err != nil {
+		if err := writeHeader(fw.zipw, h.FileHeader); err != nil {
 			return nil, err
 		}
 	}
@@ -350,7 +350,7 @@ func (w *fileWriter) close() error {
 
 	if w.cacheMode {
 		// write FileHeader (only cacheMode)
-		if err := w.writeHeader(fh); err != nil {
+		if err := writeHeader(w.zipw, fh); err != nil {
 			return err
 		}
 
@@ -394,7 +394,7 @@ func (w *fileWriter) close() error {
 	return nil
 }
 
-func (w *fileWriter) writeHeader(h *FileHeader) error {
+func writeHeader(w io.Writer, h *FileHeader) error {
 	var buf [fileHeaderLen]byte
 	b := writeBuf(buf[:])
 	b.uint32(uint32(fileHeaderSignature))
@@ -414,13 +414,13 @@ func (w *fileWriter) writeHeader(h *FileHeader) error {
 	}
 	b.uint16(uint16(len(h.Name)))
 	b.uint16(uint16(len(h.Extra)))
-	if _, err := w.zipw.Write(buf[:]); err != nil {
+	if _, err := w.Write(buf[:]); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w.zipw, h.Name); err != nil {
+	if _, err := io.WriteString(w, h.Name); err != nil {
 		return err
 	}
-	_, err := w.zipw.Write(h.Extra)
+	_, err := w.Write(h.Extra)
 	return err
 }
 
