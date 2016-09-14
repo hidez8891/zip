@@ -9,6 +9,7 @@ import (
 	"os"
 )
 
+// Updater implements a zip file edit-writer.
 type Updater struct {
 	path    string
 	r       *ReadCloser
@@ -16,7 +17,7 @@ type Updater struct {
 	Comment string
 }
 
-// Open exist zip file for editing.
+// OpenUpdater exist zip file for editing.
 func OpenUpdater(path string) (*Updater, error) {
 	r, err := OpenReader(path)
 	if err != nil {
@@ -33,7 +34,7 @@ func OpenUpdater(path string) (*Updater, error) {
 	return u, nil
 }
 
-// Save write all changes to new zip file and close file.
+// SaveAs write all changes to new zip file and close file.
 func (u *Updater) SaveAs(newpath string) error {
 	newfile, err := os.Create(newpath)
 	if err != nil {
@@ -99,7 +100,6 @@ func (u *Updater) Save() error {
 }
 
 // Close discard all changes and close file.
-// if
 func (u *Updater) Close() error {
 	if u.r != nil {
 		return u.r.Close()
