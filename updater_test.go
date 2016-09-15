@@ -114,12 +114,16 @@ func sameReader(r1, r2 io.Reader) bool {
 
 	for {
 		b1 := make([]byte, chunksize)
-		_, err1 := r1.Read(b1)
+		n1, err1 := r1.Read(b1)
 
 		b2 := make([]byte, chunksize)
-		_, err2 := r2.Read(b2)
+		n2, err2 := r2.Read(b2)
 
-		if err1 != nil || err2 != nil {
+		if n1 != n2 || bytes.Equal(b1, b2) == false {
+			return false
+		}
+
+		if n1 == 0 || n2 == 0 {
 			if err1 == io.EOF && err2 == io.EOF {
 				return true
 			}
@@ -128,10 +132,6 @@ func sameReader(r1, r2 io.Reader) bool {
 			}
 
 			// happen fatal error
-			return false
-		}
-
-		if bytes.Equal(b1, b2) == false {
 			return false
 		}
 	}
@@ -177,30 +177,44 @@ func updaterAppendFile(t *testing.T, zt ZipTest) {
 	}
 
 	for _, file := range zt.File {
-		var found bool
+		var efile *File
 		for _, f := range r.File {
 			if file.Name == f.Name {
-				found = true
+				efile = f
 				break
 			}
 		}
 
-		if found == false {
+		if efile == nil {
 			t.Fatalf("%s does not have %s", tmpfile.Name(), file.Name)
+		}
+
+		if file.Content != nil {
+			er, _ := efile.Open()
+			defer er.Close()
+			if sameReader(er, bytes.NewReader(file.Content)) == false {
+				t.Fatalf("%s has worng file %s", tmpfile.Name(), file.Name)
+			}
 		}
 	}
 
 	for _, file := range updateAppendFiles {
-		var found bool
+		var efile *File
 		for _, f := range r.File {
 			if file.Name == f.Name {
-				found = true
+				efile = f
 				break
 			}
 		}
 
-		if found == false {
+		if efile == nil {
 			t.Fatalf("%s does not have %s", tmpfile.Name(), file.Name)
+		}
+
+		er, _ := efile.Open()
+		defer er.Close()
+		if sameReader(er, bytes.NewReader(file.Data)) == false {
+			t.Fatalf("%s has worng file %s", tmpfile.Name(), file.Name)
 		}
 	}
 }
