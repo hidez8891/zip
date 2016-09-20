@@ -239,6 +239,40 @@ func (w *Writer) CreateHeader(fh *FileHeader, streamMode bool) (io.Writer, error
 	return fw, nil
 }
 
+func (w *Writer) addFile(f *File) error {
+	if w.last != nil && !w.last.closed {
+		if err := w.last.close(); err != nil {
+			return err
+		}
+	}
+	fh := &f.FileHeader
+	h := &header{
+		FileHeader: fh,
+		offset:     uint64(w.cw.count),
+	}
+	w.dir = append(w.dir, h)
+	w.last = nil
+
+	body, err := f.bodyReader()
+	if err != nil {
+		return err
+	}
+
+	if err := writeHeader(w.cw, fh); err != nil {
+		return err
+	}
+	if _, err := io.Copy(w.cw, body); err != nil {
+		return err
+	}
+	if h.hasDataDescriptor() {
+		if err := writeDataDescriptor(w.cw, fh); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // RegisterCompressor registers or overrides a custom compressor for a specific
 // method ID. If a compressor for a given method is not found, Writer will
 // default to looking up the compressor at the package level.
@@ -299,7 +333,7 @@ func newFileWriter(zipw io.Writer, h *header, comp Compressor, cacheMode bool) (
 
 	// write FileHeader (only no cacheMode)
 	if fw.cacheMode == false {
-		if err := fw.writeHeader(h.FileHeader); err != nil {
+		if err := writeHeader(fw.zipw, h.FileHeader); err != nil {
 			return nil, err
 		}
 	}
@@ -350,7 +384,7 @@ func (w *fileWriter) close() error {
 
 	if w.cacheMode {
 		// write FileHeader (only cacheMode)
-		if err := w.writeHeader(fh); err != nil {
+		if err := writeHeader(w.zipw, fh); err != nil {
 			return err
 		}
 
@@ -369,24 +403,7 @@ func (w *fileWriter) close() error {
 	// The approach here is to write 8 byte sizes if needed without
 	// adding a zip64 extra in the local header (too late anyway).
 	if fh.hasDataDescriptor() {
-		var buf []byte
-		if fh.isZip64() {
-			buf = make([]byte, dataDescriptor64Len)
-		} else {
-			buf = make([]byte, dataDescriptorLen)
-		}
-		b := writeBuf(buf)
-		b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
-		b.uint32(fh.CRC32)
-		if fh.isZip64() {
-			b.uint64(fh.CompressedSize64)
-			b.uint64(fh.UncompressedSize64)
-		} else {
-			b.uint32(fh.CompressedSize)
-			b.uint32(fh.UncompressedSize)
-		}
-		_, err := w.zipw.Write(buf)
-		if err != nil {
+		if err := writeDataDescriptor(w.zipw, fh); err != nil {
 			return err
 		}
 	}
@@ -394,7 +411,7 @@ func (w *fileWriter) close() error {
 	return nil
 }
 
-func (w *fileWriter) writeHeader(h *FileHeader) error {
+func writeHeader(w io.Writer, h *FileHeader) error {
 	var buf [fileHeaderLen]byte
 	b := writeBuf(buf[:])
 	b.uint32(uint32(fileHeaderSignature))
@@ -414,14 +431,38 @@ func (w *fileWriter) writeHeader(h *FileHeader) error {
 	}
 	b.uint16(uint16(len(h.Name)))
 	b.uint16(uint16(len(h.Extra)))
-	if _, err := w.zipw.Write(buf[:]); err != nil {
+	if _, err := w.Write(buf[:]); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w.zipw, h.Name); err != nil {
+	if _, err := io.WriteString(w, h.Name); err != nil {
 		return err
 	}
-	_, err := w.zipw.Write(h.Extra)
+	_, err := w.Write(h.Extra)
 	return err
+}
+
+func writeDataDescriptor(w io.Writer, fh *FileHeader) error {
+	var buf []byte
+	if fh.isZip64() {
+		buf = make([]byte, dataDescriptor64Len)
+	} else {
+		buf = make([]byte, dataDescriptorLen)
+	}
+	b := writeBuf(buf)
+	b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
+	b.uint32(fh.CRC32)
+	if fh.isZip64() {
+		b.uint64(fh.CompressedSize64)
+		b.uint64(fh.UncompressedSize64)
+	} else {
+		b.uint32(fh.CompressedSize)
+		b.uint32(fh.UncompressedSize)
+	}
+	_, err := w.Write(buf)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 type countWriter struct {
