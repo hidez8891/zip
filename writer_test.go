@@ -110,6 +110,10 @@ func TestWriterOffset(t *testing.T) {
 			testCreate(t, w, &wt, streamMode)
 		}
 
+		// write comment
+		comment := "zip archive comment"
+		w.Comment = comment
+
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -121,6 +125,10 @@ func TestWriterOffset(t *testing.T) {
 		}
 		for i, wt := range writeTests {
 			testReadFile(t, r.File[i], &wt)
+		}
+		// read comment
+		if r.Comment != comment {
+			t.Fatalf("Archive comment: got %q, want %q", r.Comment, comment)
 		}
 	}
 }
