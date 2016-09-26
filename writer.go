@@ -15,8 +15,6 @@ import (
 	"os"
 )
 
-// TODO(adg): support zip file comments
-
 // Writer implements a zip file writer.
 type Writer struct {
 	cw          *countWriter
@@ -24,6 +22,7 @@ type Writer struct {
 	last        *fileWriter
 	closed      bool
 	compressors map[uint16]Compressor
+	Comment     string
 }
 
 type header struct {
@@ -164,15 +163,19 @@ func (w *Writer) Close() error {
 
 	// write end record
 	var buf [directoryEndLen]byte
+	comm := []byte(w.Comment)
 	b := writeBuf(buf[:])
 	b.uint32(uint32(directoryEndSignature))
-	b = b[4:]                 // skip over disk number and first disk number (2x uint16)
-	b.uint16(uint16(records)) // number of entries this disk
-	b.uint16(uint16(records)) // number of entries total
-	b.uint32(uint32(size))    // size of directory
-	b.uint32(uint32(offset))  // start of directory
-	// skipped size of comment (always zero)
+	b = b[4:]                   // skip over disk number and first disk number (2x uint16)
+	b.uint16(uint16(records))   // number of entries this disk
+	b.uint16(uint16(records))   // number of entries total
+	b.uint32(uint32(size))      // size of directory
+	b.uint32(uint32(offset))    // start of directory
+	b.uint16(uint16(len(comm))) // comment length
 	if _, err := w.cw.Write(buf[:]); err != nil {
+		return err
+	}
+	if _, err := w.cw.Write(comm); err != nil {
 		return err
 	}
 
