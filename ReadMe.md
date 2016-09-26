@@ -5,7 +5,7 @@ Fix and update Go's archive/zip
 - [x] fix file/directory datatime
 - [x] support no-data-descriptor format
 - [x] add existing zip file updater
-- [ ] support zip archive comment
+- [x] support zip archive comment
 - [ ] support local file block's extra fields
 
 ### history
