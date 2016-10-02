@@ -142,6 +142,7 @@ func (u *Updater) SaveAs(newpath string) error {
 
 	// copy & write
 	w := NewWriter(newfile)
+	w.Comment = u.Comment
 	for _, header := range u.File {
 		var (
 			file *File
