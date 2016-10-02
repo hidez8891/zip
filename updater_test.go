@@ -106,6 +106,10 @@ func sameFileCheck(path1, path2 string) bool {
 		}
 	}
 
+	if z1.Comment != z2.Comment {
+		return false
+	}
+
 	return true
 }
 
