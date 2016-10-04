@@ -6,7 +6,8 @@ Fix and update Go's archive/zip
 - [x] support no-data-descriptor format
 - [x] add existing zip file updater
 - [x] support zip archive comment
-- [ ] support local file block's extra fields
+- [x] support local file block's extra fields
+- [ ] support internal attribute field
 
 ### history
 

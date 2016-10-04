@@ -433,14 +433,14 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 		b.uint32(h.UncompressedSize)
 	}
 	b.uint16(uint16(len(h.Name)))
-	b.uint16(uint16(len(h.Extra)))
+	b.uint16(uint16(len(h.FileExtra)))
 	if _, err := w.Write(buf[:]); err != nil {
 		return err
 	}
 	if _, err := io.WriteString(w, h.Name); err != nil {
 		return err
 	}
-	_, err := w.Write(h.Extra)
+	_, err := w.Write(h.FileExtra)
 	return err
 }
 
