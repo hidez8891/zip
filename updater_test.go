@@ -73,44 +73,9 @@ func updaterOnlyCopy(t *testing.T, zt ZipTest) {
 }
 
 func sameFileCheck(path1, path2 string) bool {
-	// zip.Writer isn't conform to the zip's specifications.
-	//   (1) Local File Header's extra fields are ignored.
-	//       So, Central Directory Header's is written insted.
-	//   (2) zip's comment is ignored.
-	//
-	// inState, _ := os.Stat(path1)
-	// outState, _ := os.Stat(path2)
-	// return os.SameFile(inState, outState)
-
-	z1, _ := OpenReader(path1)
-	defer z1.Close()
-	z2, _ := OpenReader(path2)
-	defer z2.Close()
-
-	if len(z1.File) != len(z2.File) {
-		return false
-	}
-
-	for i := range z1.File {
-		f1 := z1.File[i]
-		f2 := z2.File[i]
-
-		if f1.Name != f2.Name {
-			return false
-		}
-
-		r1, _ := f1.bodyReader()
-		r2, _ := f2.bodyReader()
-		if sameReader(r1, r2) == false {
-			return false
-		}
-	}
-
-	if z1.Comment != z2.Comment {
-		return false
-	}
-
-	return true
+	inState, _ := os.Stat(path1)
+	outState, _ := os.Stat(path2)
+	return os.SameFile(inState, outState)
 }
 
 func sameReader(r1, r2 io.Reader) bool {
