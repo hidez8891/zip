@@ -112,6 +112,13 @@ func (z *Reader) init(r io.ReaderAt, size int64) error {
 		// the wrong number of directory entries.
 		return err
 	}
+
+	// read local file header's extra block
+	for _, f := range z.File {
+		if err := f.readLocalFileExtraBlock(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -255,6 +262,32 @@ func (f *File) findBodyOffset() (int64, error) {
 	filenameLen := int(b.uint16())
 	extraLen := int(b.uint16())
 	return int64(fileHeaderLen + filenameLen + extraLen), nil
+}
+
+// readLocalFileExtraBlock read local file header's extra block.
+func (f *File) readLocalFileExtraBlock() error {
+	var buf [4]byte
+	if _, err := f.zipr.ReadAt(buf[:], f.headerOffset+26); err != nil {
+		if err == io.EOF {
+			return io.ErrUnexpectedEOF
+		}
+		return err
+	}
+	b := readBuf(buf[:])
+	filenameLen := int(b.uint16())
+	extraLen := int(b.uint16())
+
+	extraBlock := make([]byte, extraLen)
+	extraBlockOffset := f.headerOffset + int64(fileHeaderLen+filenameLen)
+	if _, err := f.zipr.ReadAt(extraBlock[:], extraBlockOffset); err != nil {
+		if err == io.EOF {
+			return io.ErrUnexpectedEOF
+		}
+		return err
+	}
+	f.FileExtra = extraBlock
+
+	return nil
 }
 
 // readDirectoryHeader attempts to read a directory header from r.

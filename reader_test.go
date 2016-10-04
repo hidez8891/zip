@@ -764,25 +764,9 @@ func TestIssue10957(t *testing.T) {
 		"0000000000000000\v\x00\x00\x00" +
 		"\x00\x0000PK\x05\x06000000\x05\x000000" +
 		"\v\x00\x00\x00\x00\x00")
-	z, err := NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, f := range z.File {
-		r, err := f.Open()
-		if err != nil {
-			continue
-		}
-		if f.UncompressedSize64 < 1e6 {
-			n, err := io.Copy(ioutil.Discard, r)
-			if i == 3 && err != io.ErrUnexpectedEOF {
-				t.Errorf("File[3] error = %v; want io.ErrUnexpectedEOF", err)
-			}
-			if err == nil && uint64(n) != f.UncompressedSize64 {
-				t.Errorf("file %d: bad size: copied=%d; want=%d", i, n, f.UncompressedSize64)
-			}
-		}
-		r.Close()
+	_, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != io.ErrUnexpectedEOF {
+		t.Errorf("Open error = %v; want io.ErrUnexpectedEOF", err)
 	}
 }
 
