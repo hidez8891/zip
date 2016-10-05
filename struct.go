@@ -87,6 +87,7 @@ type FileHeader struct {
 	UncompressedSize64 uint64
 	Extra              []byte
 	FileExtra          []byte
+	InternalAttrs      uint32
 	ExternalAttrs      uint32 // Meaning depends on CreatorVersion
 	Comment            string
 }

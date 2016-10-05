@@ -316,7 +316,7 @@ func readDirectoryHeader(f *File, r io.Reader) error {
 	filenameLen := int(b.uint16())
 	extraLen := int(b.uint16())
 	commentLen := int(b.uint16())
-	b = b[4:] // skipped start disk number and internal attributes (2x uint16)
+	f.InternalAttrs = b.uint32()
 	f.ExternalAttrs = b.uint32()
 	f.headerOffset = int64(b.uint32())
 	d := make([]byte, filenameLen+extraLen+commentLen)
