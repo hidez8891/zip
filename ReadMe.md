@@ -7,7 +7,7 @@ Fix and update Go's archive/zip
 - [x] add existing zip file updater
 - [x] support zip archive comment
 - [x] support local file block's extra fields
-- [ ] support internal attribute field
+- [x] support internal attribute field
 
 ### history
 
