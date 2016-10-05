@@ -67,15 +67,50 @@ func updaterOnlyCopy(t *testing.T, zt ZipTest) {
 		t.Fatalf("%s save to %s failed: %v", zt.Name, tmpfile.Name(), err)
 	}
 
-	if sameFileCheck(testfile, tmpfile.Name()) == false {
+	if sameFileCheck(testfile, tmpfile.Name(), t) == false {
 		t.Fatalf("%s not same to %s: copy failed", zt.Name, tmpfile.Name())
 	}
 }
 
-func sameFileCheck(path1, path2 string) bool {
-	inState, _ := os.Stat(path1)
-	outState, _ := os.Stat(path2)
-	return os.SameFile(inState, outState)
+func sameFileCheck(path1, path2 string, t *testing.T) bool {
+	const chunkSize = 12800
+
+	f1, err := os.Open(path1)
+	if err != nil {
+		t.Fatal(err)
+		return false
+	}
+
+	f2, err := os.Open(path2)
+	if err != nil {
+		t.Fatal(err)
+		return false
+	}
+
+	for {
+		b1 := make([]byte, chunkSize)
+		b2 := make([]byte, chunkSize)
+
+		_, err1 := f1.Read(b1)
+		_, err2 := f2.Read(b2)
+
+		if err1 != nil || err2 != nil {
+			if err1 == io.EOF && err2 == io.EOF {
+				return true
+			} else if err1 == io.EOF || err2 == io.EOF {
+				return false
+			} else {
+				t.Fatal(err)
+				return false
+			}
+		}
+
+		if !bytes.Equal(b1, b2) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func sameReader(r1, r2 io.Reader) bool {
