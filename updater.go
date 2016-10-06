@@ -112,6 +112,7 @@ func (u *Updater) SaveAs(newpath string) error {
 
 	defer func() {
 		if newfile != nil {
+			newfile.Close()
 			os.Remove(newpath)
 		}
 	}()
@@ -171,7 +172,6 @@ func (u *Updater) SaveAs(newpath string) error {
 		}
 
 		if err := w.addFile(file); err != nil {
-			newfile.Close()
 			return err
 		}
 	}
@@ -192,6 +192,9 @@ func (u *Updater) SaveAs(newpath string) error {
 
 	if u.tmpw != nil {
 		if err := u.tmpw.Close(); err != nil {
+			return err
+		}
+		if err := os.Remove(u.tmpw.Name()); err != nil {
 			return err
 		}
 		u.tmpw = nil

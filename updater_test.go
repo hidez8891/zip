@@ -80,12 +80,14 @@ func sameFileCheck(path1, path2 string, t *testing.T) bool {
 		t.Fatal(err)
 		return false
 	}
+	defer f1.Close()
 
 	f2, err := os.Open(path2)
 	if err != nil {
 		t.Fatal(err)
 		return false
 	}
+	defer f2.Close()
 
 	for {
 		b1 := make([]byte, chunkSize)
@@ -221,4 +223,6 @@ func updaterAppendFile(t *testing.T, zt ZipTest) {
 			t.Fatalf("%s has worng file %s", tmpfile.Name(), file.Name)
 		}
 	}
+
+	r.Close()
 }
