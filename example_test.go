@@ -5,13 +5,14 @@
 package zip_test
 
 import (
-	"archive/zip"
 	"bytes"
 	"compress/flate"
 	"fmt"
 	"io"
 	"log"
 	"os"
+
+	"github.com/hidez8891/zip"
 )
 
 func ExampleWriter() {
@@ -30,7 +31,8 @@ func ExampleWriter() {
 		{"todo.txt", "Get animal handling licence.\nWrite more examples."},
 	}
 	for _, file := range files {
-		f, err := w.Create(file.Name)
+		streamMode := true
+		f, err := w.Create(file.Name, streamMode)
 		if err != nil {
 			log.Fatal(err)
 		}
