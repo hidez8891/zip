@@ -170,7 +170,7 @@ func (u *Updater) SaveAs(newpath string) error {
 		}
 
 		if file == nil {
-			return fmt.Errorf("zip: file %s does not exist", file.Name)
+			return fmt.Errorf("zip: file %s does not exist", header.Name)
 		}
 
 		if err := w.addFile(file); err != nil {
