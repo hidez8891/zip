@@ -13,6 +13,8 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
+
+	"github.com/hidez8891/encstr"
 )
 
 var (
@@ -24,7 +26,7 @@ var (
 type Reader struct {
 	r             io.ReaderAt
 	File          []*File
-	Comment       string
+	Comment       *encstr.String
 	decompressors map[uint16]Decompressor
 }
 
@@ -323,9 +325,9 @@ func readDirectoryHeader(f *File, r io.Reader) error {
 	if _, err := io.ReadFull(r, d); err != nil {
 		return err
 	}
-	f.Name = string(d[:filenameLen])
+	f.Name = encstr.NewString2(d[:filenameLen], LocalEncoding)
 	f.Extra = d[filenameLen : filenameLen+extraLen]
-	f.Comment = string(d[filenameLen+extraLen:])
+	f.Comment = encstr.NewString2(d[filenameLen+extraLen:], LocalEncoding)
 
 	needUSize := f.UncompressedSize == ^uint32(0)
 	needCSize := f.CompressedSize == ^uint32(0)
@@ -470,7 +472,7 @@ func readDirectoryEnd(r io.ReaderAt, size int64) (dir *directoryEnd, err error) 
 	if l > len(b) {
 		return nil, errors.New("zip: invalid comment length")
 	}
-	d.comment = string(b[:l])
+	d.comment = encstr.NewString2(b[:l], LocalEncoding)
 
 	// These values mean that the file can be a zip64 file
 	if d.directoryRecords == 0xffff || d.directorySize == 0xffff || d.directoryOffset == 0xffffffff {

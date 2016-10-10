@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hidez8891/encstr"
 )
 
 func TestOver65kFiles(t *testing.T) {
@@ -28,7 +30,7 @@ func TestOver65kFiles(t *testing.T) {
 		const nFiles = (1 << 16) + 42
 		for i := 0; i < nFiles; i++ {
 			_, err := w.CreateHeader(&FileHeader{
-				Name:   fmt.Sprintf("%d.dat", i),
+				Name:   encstr.NewString(fmt.Sprintf("%d.dat", i)),
 				Method: Store, // avoid Issue 6136 and Issue 6138
 			}, streamMode)
 			if err != nil {
@@ -48,7 +50,7 @@ func TestOver65kFiles(t *testing.T) {
 		}
 		for i := 0; i < nFiles; i++ {
 			want := fmt.Sprintf("%d.dat", i)
-			if zr.File[i].Name != want {
+			if zr.File[i].Name.Str() != want {
 				t.Fatalf("File(%d) = %q, want %q", i, zr.File[i].Name, want)
 			}
 		}
@@ -94,7 +96,7 @@ func testHeaderRoundTrip(fh *FileHeader, wantUncompressedSize uint32, wantUncomp
 
 func TestFileHeaderRoundTrip(t *testing.T) {
 	fh := &FileHeader{
-		Name:             "foo.txt",
+		Name:             encstr.NewString("foo.txt"),
 		UncompressedSize: 987654321,
 		ModifiedTime:     1234,
 		ModifiedDate:     5678,
@@ -104,7 +106,7 @@ func TestFileHeaderRoundTrip(t *testing.T) {
 
 func TestFileHeaderRoundTrip64(t *testing.T) {
 	fh := &FileHeader{
-		Name:               "foo.txt",
+		Name:               encstr.NewString("foo.txt"),
 		UncompressedSize64: 9876543210,
 		ModifiedTime:       1234,
 		ModifiedDate:       5678,
@@ -263,7 +265,7 @@ func testZip64(t testing.TB, size int64, streamMode bool) *rleBuffer {
 	buf := new(rleBuffer)
 	w := NewWriter(buf)
 	f, err := w.CreateHeader(&FileHeader{
-		Name:   "huge.txt",
+		Name:   encstr.NewString("huge.txt"),
 		Method: Store,
 	}, streamMode)
 	if err != nil {
@@ -407,7 +409,7 @@ func TestHeaderInvalidTagAndSize(t *testing.T) {
 	filename := ts.Format(timeFormat)
 
 	h := FileHeader{
-		Name:   filename,
+		Name:   encstr.NewString(filename),
 		Method: Deflate,
 		Extra:  []byte(ts.Format(time.RFC3339Nano)), // missing tag and len, but Extra is best-effort parsing
 	}
@@ -418,7 +420,7 @@ func TestHeaderInvalidTagAndSize(t *testing.T) {
 
 func TestHeaderTooShort(t *testing.T) {
 	h := FileHeader{
-		Name:   "foo.txt",
+		Name:   encstr.NewString("foo.txt"),
 		Method: Deflate,
 		Extra:  []byte{zip64ExtraId}, // missing size and second half of tag, but Extra is best-effort parsing
 	}
@@ -427,7 +429,7 @@ func TestHeaderTooShort(t *testing.T) {
 
 func TestHeaderIgnoredSize(t *testing.T) {
 	h := FileHeader{
-		Name:   "foo.txt",
+		Name:   encstr.NewString("foo.txt"),
 		Method: Deflate,
 		Extra:  []byte{zip64ExtraId & 0xFF, zip64ExtraId >> 8, 24, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8}, // bad size but shouldn't be consulted
 	}
@@ -438,7 +440,7 @@ func TestHeaderIgnoredSize(t *testing.T) {
 // which contains no body.
 func TestZeroLengthHeader(t *testing.T) {
 	h := FileHeader{
-		Name:   "extadata.txt",
+		Name:   encstr.NewString("extadata.txt"),
 		Method: Deflate,
 		Extra: []byte{
 			85, 84, 5, 0, 3, 154, 144, 195, 77, // tag 21589 size 5

@@ -23,6 +23,9 @@ import (
 	"os"
 	"path"
 	"time"
+
+	"github.com/hidez8891/encstr"
+	"golang.org/x/text/encoding/unicode"
 )
 
 // Compression methods.
@@ -69,6 +72,9 @@ const (
 	useUTF8           = 0x0800 // filename & comment is UTF-8
 )
 
+// LocalEncoding is default local encoding
+var LocalEncoding = unicode.UTF8
+
 // FileHeader describes a file within a zip file.
 // See the zip spec for details.
 type FileHeader struct {
@@ -76,7 +82,7 @@ type FileHeader struct {
 	// It must be a relative path: it must not start with a drive
 	// letter (e.g. C:) or leading slash, and only forward slashes
 	// are allowed.
-	Name string
+	Name *encstr.String
 
 	CreatorVersion     uint16
 	ReaderVersion      uint16
@@ -93,7 +99,7 @@ type FileHeader struct {
 	FileExtra          []byte
 	InternalAttrs      uint32
 	ExternalAttrs      uint32 // Meaning depends on CreatorVersion
-	Comment            string
+	Comment            *encstr.String
 }
 
 // FileInfo returns an os.FileInfo for the FileHeader.
@@ -106,7 +112,7 @@ type headerFileInfo struct {
 	fh *FileHeader
 }
 
-func (fi headerFileInfo) Name() string { return path.Base(fi.fh.Name) }
+func (fi headerFileInfo) Name() string { return path.Base(fi.fh.Name.Str()) }
 func (fi headerFileInfo) Size() int64 {
 	if fi.fh.UncompressedSize64 > 0 {
 		return int64(fi.fh.UncompressedSize64)
@@ -126,7 +132,7 @@ func (fi headerFileInfo) Sys() interface{}   { return fi.fh }
 func FileInfoHeader(fi os.FileInfo) (*FileHeader, error) {
 	size := fi.Size()
 	fh := &FileHeader{
-		Name:               fi.Name(),
+		Name:               encstr.NewString(fi.Name()),
 		UncompressedSize64: uint64(size),
 	}
 	fh.SetModTime(fi.ModTime())
@@ -147,7 +153,7 @@ type directoryEnd struct {
 	directorySize      uint64
 	directoryOffset    uint64 // relative to file
 	commentLen         uint16
-	comment            string
+	comment            *encstr.String
 }
 
 // msDosTimeToTime converts an MS-DOS date and time into a time.Time.
@@ -219,7 +225,9 @@ func (h *FileHeader) Mode() (mode os.FileMode) {
 	case creatorNTFS, creatorVFAT, creatorFAT:
 		mode = msdosModeToFileMode(h.ExternalAttrs)
 	}
-	if len(h.Name) > 0 && h.Name[len(h.Name)-1] == '/' {
+
+	name := h.Name.Str()
+	if len(name) > 0 && name[len(name)-1] == '/' {
 		mode |= os.ModeDir
 	}
 	return mode

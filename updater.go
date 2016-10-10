@@ -9,6 +9,8 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+
+	"github.com/hidez8891/encstr"
 )
 
 type editorFileHeader struct {
@@ -23,7 +25,7 @@ type Updater struct {
 	w       *Writer
 	tmpw    *os.File
 	File    []*editorFileHeader
-	Comment string
+	Comment *encstr.String
 }
 
 // OpenUpdater exist zip file for editing.
