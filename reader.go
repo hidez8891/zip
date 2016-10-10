@@ -42,7 +42,7 @@ type File struct {
 }
 
 func (f *File) hasDataDescriptor() bool {
-	return f.Flags&0x8 != 0
+	return f.Flags&useDataDescriptor != 0
 }
 
 // OpenReader will open the Zip file specified by name and return a ReadCloser.

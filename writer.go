@@ -216,7 +216,7 @@ func (w *Writer) CreateHeader(fh *FileHeader, streamMode bool) (io.Writer, error
 	}
 
 	if streamMode {
-		fh.Flags |= 0x8 // we will write a data descriptor
+		fh.Flags |= useDataDescriptor // we will write a data descriptor
 	}
 
 	fh.CreatorVersion = fh.CreatorVersion&0xff00 | zipVersion20 // preserve compatibility byte
@@ -379,7 +379,7 @@ func (w *fileWriter) close() error {
 		fh.CompressedSize = uint32max
 		fh.UncompressedSize = uint32max
 		fh.ReaderVersion = zipVersion45 // requires 4.5 - File uses ZIP64 format extensions
-		fh.Flags |= 0x8                 // require  data descriptor
+		fh.Flags |= useDataDescriptor   // require  data descriptor
 	} else {
 		fh.CompressedSize = uint32(fh.CompressedSize64)
 		fh.UncompressedSize = uint32(fh.UncompressedSize64)

@@ -63,6 +63,10 @@ const (
 
 	// extra header id's
 	zip64ExtraId = 0x0001 // zip64 Extended Information Extra Field
+
+	// flags
+	useDataDescriptor = 0x08   // use data descriptor
+	useUTF8           = 0x0800 // filename & comment is UTF-8
 )
 
 // FileHeader describes a file within a zip file.
