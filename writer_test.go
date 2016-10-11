@@ -137,8 +137,9 @@ func TestWriterOffset(t *testing.T) {
 
 func testCreate(t *testing.T, w *Writer, wt *WriteTest, streamMode bool) {
 	header := &FileHeader{
-		Name:   encstr.NewString(wt.Name),
-		Method: wt.Method,
+		Name:    encstr.NewString(wt.Name),
+		Method:  wt.Method,
+		Comment: encstr.NewString(""),
 	}
 	if wt.Mode != 0 {
 		header.SetMode(wt.Mode)
@@ -184,8 +185,9 @@ func BenchmarkCompressedZipGarbage(b *testing.B) {
 		zw := NewWriter(&buf)
 		for j := 0; j < 3; j++ {
 			w, _ := zw.CreateHeader(&FileHeader{
-				Name:   encstr.NewString("foo"),
-				Method: Deflate,
+				Name:    encstr.NewString("foo"),
+				Method:  Deflate,
+				Comment: encstr.NewString(""),
 			}, true)
 			w.Write(bigBuf)
 		}

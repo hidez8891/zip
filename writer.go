@@ -34,7 +34,10 @@ type header struct {
 
 // NewWriter returns a new Writer writing a zip file to w.
 func NewWriter(w io.Writer) *Writer {
-	return &Writer{cw: &countWriter{w: bufio.NewWriter(w)}}
+	return &Writer{
+		cw:      &countWriter{w: bufio.NewWriter(w)},
+		Comment: encstr.NewString(""),
+	}
 }
 
 // SetOffset sets the offset of the beginning of the zip data within the
@@ -193,8 +196,9 @@ func (w *Writer) Close() error {
 // call to Create, CreateHeader, or Close.
 func (w *Writer) Create(name string, streamMode bool) (io.Writer, error) {
 	header := &FileHeader{
-		Name:   encstr.NewString(name),
-		Method: Deflate,
+		Name:    encstr.NewString(name),
+		Method:  Deflate,
+		Comment: encstr.NewString(""),
 	}
 	return w.CreateHeader(header, streamMode)
 }

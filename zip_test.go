@@ -30,8 +30,9 @@ func TestOver65kFiles(t *testing.T) {
 		const nFiles = (1 << 16) + 42
 		for i := 0; i < nFiles; i++ {
 			_, err := w.CreateHeader(&FileHeader{
-				Name:   encstr.NewString(fmt.Sprintf("%d.dat", i)),
-				Method: Store, // avoid Issue 6136 and Issue 6138
+				Name:    encstr.NewString(fmt.Sprintf("%d.dat", i)),
+				Method:  Store, // avoid Issue 6136 and Issue 6138
+				Comment: encstr.NewString(""),
 			}, streamMode)
 			if err != nil {
 				t.Fatalf("creating file %d: %v", i, err)
@@ -73,7 +74,7 @@ func testHeaderRoundTrip(fh *FileHeader, wantUncompressedSize uint32, wantUncomp
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := fh2.Name, fh.Name; got != want {
+	if got, want := fh2.Name.Str(), fh.Name.Str(); got != want {
 		t.Errorf("Name: got %s, want %s\n", got, want)
 	}
 	if got, want := fh2.UncompressedSize, wantUncompressedSize; got != want {
@@ -100,6 +101,7 @@ func TestFileHeaderRoundTrip(t *testing.T) {
 		UncompressedSize: 987654321,
 		ModifiedTime:     1234,
 		ModifiedDate:     5678,
+		Comment:          encstr.NewString(""),
 	}
 	testHeaderRoundTrip(fh, fh.UncompressedSize, uint64(fh.UncompressedSize), t)
 }
@@ -110,6 +112,7 @@ func TestFileHeaderRoundTrip64(t *testing.T) {
 		UncompressedSize64: 9876543210,
 		ModifiedTime:       1234,
 		ModifiedDate:       5678,
+		Comment:            encstr.NewString(""),
 	}
 	testHeaderRoundTrip(fh, uint32max, fh.UncompressedSize64, t)
 }
@@ -265,8 +268,9 @@ func testZip64(t testing.TB, size int64, streamMode bool) *rleBuffer {
 	buf := new(rleBuffer)
 	w := NewWriter(buf)
 	f, err := w.CreateHeader(&FileHeader{
-		Name:   encstr.NewString("huge.txt"),
-		Method: Store,
+		Name:    encstr.NewString("huge.txt"),
+		Method:  Store,
+		Comment: encstr.NewString(""),
 	}, streamMode)
 	if err != nil {
 		t.Fatal(err)
@@ -395,8 +399,8 @@ func testValidHeader(h *FileHeader, t *testing.T) {
 			t.Fatalf("got %v, expected nil", err)
 		}
 		zh := zf.File[0].FileHeader
-		if zh.Name != h.Name || zh.Method != h.Method || zh.UncompressedSize64 != uint64(len("hi")) {
-			t.Fatalf("got %q/%d/%d expected %q/%d/%d", zh.Name, zh.Method, zh.UncompressedSize64, h.Name, h.Method, len("hi"))
+		if zh.Name.Str() != h.Name.Str() || zh.Method != h.Method || zh.UncompressedSize64 != uint64(len("hi")) {
+			t.Fatalf("got %q/%d/%d expected %q/%d/%d", zh.Name.Str(), zh.Method, zh.UncompressedSize64, h.Name.Str(), h.Method, len("hi"))
 		}
 	}
 }
@@ -409,9 +413,10 @@ func TestHeaderInvalidTagAndSize(t *testing.T) {
 	filename := ts.Format(timeFormat)
 
 	h := FileHeader{
-		Name:   encstr.NewString(filename),
-		Method: Deflate,
-		Extra:  []byte(ts.Format(time.RFC3339Nano)), // missing tag and len, but Extra is best-effort parsing
+		Name:    encstr.NewString(filename),
+		Method:  Deflate,
+		Extra:   []byte(ts.Format(time.RFC3339Nano)), // missing tag and len, but Extra is best-effort parsing
+		Comment: encstr.NewString(""),
 	}
 	h.SetModTime(ts)
 
@@ -420,18 +425,20 @@ func TestHeaderInvalidTagAndSize(t *testing.T) {
 
 func TestHeaderTooShort(t *testing.T) {
 	h := FileHeader{
-		Name:   encstr.NewString("foo.txt"),
-		Method: Deflate,
-		Extra:  []byte{zip64ExtraId}, // missing size and second half of tag, but Extra is best-effort parsing
+		Name:    encstr.NewString("foo.txt"),
+		Method:  Deflate,
+		Extra:   []byte{zip64ExtraId}, // missing size and second half of tag, but Extra is best-effort parsing
+		Comment: encstr.NewString(""),
 	}
 	testValidHeader(&h, t)
 }
 
 func TestHeaderIgnoredSize(t *testing.T) {
 	h := FileHeader{
-		Name:   encstr.NewString("foo.txt"),
-		Method: Deflate,
-		Extra:  []byte{zip64ExtraId & 0xFF, zip64ExtraId >> 8, 24, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8}, // bad size but shouldn't be consulted
+		Name:    encstr.NewString("foo.txt"),
+		Method:  Deflate,
+		Extra:   []byte{zip64ExtraId & 0xFF, zip64ExtraId >> 8, 24, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8}, // bad size but shouldn't be consulted
+		Comment: encstr.NewString(""),
 	}
 	testValidHeader(&h, t)
 }
@@ -446,6 +453,7 @@ func TestZeroLengthHeader(t *testing.T) {
 			85, 84, 5, 0, 3, 154, 144, 195, 77, // tag 21589 size 5
 			85, 120, 0, 0, // tag 30805 size 0
 		},
+		Comment: encstr.NewString(""),
 	}
 	testValidHeader(&h, t)
 }
