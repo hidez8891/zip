@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/hidez8891/encstr"
-	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/encoding/charmap"
 )
 
 // Compression methods.
@@ -73,7 +73,7 @@ const (
 )
 
 // LocalEncoding is default local encoding
-var LocalEncoding = unicode.UTF8
+var LocalEncoding = charmap.CodePage437
 
 // FileHeader describes a file within a zip file.
 // See the zip spec for details.
@@ -133,8 +133,10 @@ func FileInfoHeader(fi os.FileInfo) (*FileHeader, error) {
 	size := fi.Size()
 	fh := &FileHeader{
 		Name:               encstr.NewString(fi.Name()),
+		Comment:            encstr.NewString2([]byte{}, LocalEncoding),
 		UncompressedSize64: uint64(size),
 	}
+	fh.Name.Convert(LocalEncoding)
 	fh.SetModTime(fi.ModTime())
 	fh.SetMode(fi.Mode())
 	if fh.UncompressedSize64 > uint32max {
