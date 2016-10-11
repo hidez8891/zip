@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/hidez8891/encstr"
+	"golang.org/x/text/encoding/unicode"
 )
 
 var (
@@ -114,6 +115,13 @@ func (z *Reader) init(r io.ReaderAt, size int64) error {
 		// the wrong number of directory entries.
 		return err
 	}
+
+	// estimate archive comment encoding
+	enc := LocalEncoding
+	if len(z.File) != 0 && z.File[0].Name.Encoding() == unicode.UTF8 {
+		enc = unicode.UTF8
+	}
+	z.Comment.ForceConvert(enc)
 
 	// read local file header's extra block
 	for _, f := range z.File {
@@ -325,9 +333,14 @@ func readDirectoryHeader(f *File, r io.Reader) error {
 	if _, err := io.ReadFull(r, d); err != nil {
 		return err
 	}
-	f.Name = encstr.NewString2(d[:filenameLen], LocalEncoding)
+
+	enc := LocalEncoding
+	if f.Flags&useUTF8 != 0 {
+		enc = unicode.UTF8
+	}
+	f.Name = encstr.NewString2(d[:filenameLen], enc)
 	f.Extra = d[filenameLen : filenameLen+extraLen]
-	f.Comment = encstr.NewString2(d[filenameLen+extraLen:], LocalEncoding)
+	f.Comment = encstr.NewString2(d[filenameLen+extraLen:], enc)
 
 	needUSize := f.UncompressedSize == ^uint32(0)
 	needCSize := f.CompressedSize == ^uint32(0)

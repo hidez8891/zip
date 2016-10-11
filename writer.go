@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/hidez8891/encstr"
+	"golang.org/x/text/encoding/unicode"
 )
 
 // Writer implements a zip file writer.
@@ -36,7 +37,7 @@ type header struct {
 func NewWriter(w io.Writer) *Writer {
 	return &Writer{
 		cw:      &countWriter{w: bufio.NewWriter(w)},
-		Comment: encstr.NewString(""),
+		Comment: encstr.NewString2([]byte{}, LocalEncoding),
 	}
 }
 
@@ -198,8 +199,9 @@ func (w *Writer) Create(name string, streamMode bool) (io.Writer, error) {
 	header := &FileHeader{
 		Name:    encstr.NewString(name),
 		Method:  Deflate,
-		Comment: encstr.NewString(""),
+		Comment: encstr.NewString2([]byte{}, LocalEncoding),
 	}
+	header.Name.Convert(LocalEncoding)
 	return w.CreateHeader(header, streamMode)
 }
 
@@ -421,6 +423,14 @@ func (w *fileWriter) close() error {
 }
 
 func writeHeader(w io.Writer, h *FileHeader) error {
+	if h.Name.Encoding() == unicode.UTF8 {
+		h.Comment.Convert(unicode.UTF8)
+		h.Flags |= useUTF8
+	} else {
+		h.Comment.Convert(LocalEncoding)
+		h.Flags &^= useUTF8
+	}
+
 	var buf [fileHeaderLen]byte
 	b := writeBuf(buf[:])
 	b.uint32(uint32(fileHeaderSignature))
