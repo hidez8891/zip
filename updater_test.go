@@ -185,7 +185,7 @@ func updaterAppendFile(t *testing.T, zt ZipTest) {
 	for _, file := range zt.File {
 		var efile *File
 		for _, f := range r.File {
-			if file.Name == f.Name {
+			if file.Name == f.Name.Str() {
 				efile = f
 				break
 			}
@@ -207,7 +207,7 @@ func updaterAppendFile(t *testing.T, zt ZipTest) {
 	for _, file := range updateAppendFiles {
 		var efile *File
 		for _, f := range r.File {
-			if file.Name == f.Name {
+			if file.Name == f.Name.Str() {
 				efile = f
 				break
 			}

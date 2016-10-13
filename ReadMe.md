@@ -8,6 +8,7 @@ Fix and update Go's archive/zip
 - [x] support zip archive comment
 - [x] support local file block's extra fields
 - [x] support internal attribute field
+- [x] enable change name/comment encoding
 
 ### history
 

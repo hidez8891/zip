@@ -9,6 +9,8 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+
+	"github.com/hidez8891/encstr"
 )
 
 type editorFileHeader struct {
@@ -23,7 +25,7 @@ type Updater struct {
 	w       *Writer
 	tmpw    *os.File
 	File    []*editorFileHeader
-	Comment string
+	Comment *encstr.String
 }
 
 // OpenUpdater exist zip file for editing.
@@ -161,14 +163,14 @@ func (u *Updater) SaveAs(newpath string) error {
 		}
 
 		for _, f := range zipr.File {
-			if f.Name == header.Name {
+			if f.Name.Str() == header.Name.Str() {
 				file = f
 				break
 			}
 		}
 
 		if file == nil {
-			return fmt.Errorf("zip: file %s does not exist", file.Name)
+			return fmt.Errorf("zip: file %s does not exist", header.Name.Str())
 		}
 
 		if err := w.addFile(file); err != nil {

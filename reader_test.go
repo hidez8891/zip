@@ -334,7 +334,7 @@ func readTestZip(t *testing.T, zt ZipTest) {
 		return
 	}
 
-	if z.Comment != zt.Comment {
+	if z.Comment.Str() != zt.Comment {
 		t.Errorf("%s: comment=%q, want %q", zt.Name, z.Comment, zt.Comment)
 	}
 	if len(z.File) != len(zt.File) {
@@ -364,7 +364,7 @@ func readTestZip(t *testing.T, zt ZipTest) {
 }
 
 func readTestFile(t *testing.T, zt ZipTest, ft ZipTestFile, f *File) {
-	if f.Name != ft.Name {
+	if f.Name.Str() != ft.Name {
 		t.Errorf("%s: name=%q, want %q", zt.Name, f.Name, ft.Name)
 	}
 

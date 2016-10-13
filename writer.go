@@ -13,6 +13,9 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+
+	"github.com/hidez8891/encstr"
+	"golang.org/x/text/encoding/unicode"
 )
 
 // Writer implements a zip file writer.
@@ -22,7 +25,7 @@ type Writer struct {
 	last        *fileWriter
 	closed      bool
 	compressors map[uint16]Compressor
-	Comment     string
+	Comment     *encstr.String
 }
 
 type header struct {
@@ -32,7 +35,10 @@ type header struct {
 
 // NewWriter returns a new Writer writing a zip file to w.
 func NewWriter(w io.Writer) *Writer {
-	return &Writer{cw: &countWriter{w: bufio.NewWriter(w)}}
+	return &Writer{
+		cw:      &countWriter{w: bufio.NewWriter(w)},
+		Comment: encstr.NewString2([]byte{}, LocalEncoding),
+	}
 }
 
 // SetOffset sets the offset of the beginning of the zip data within the
@@ -99,9 +105,9 @@ func (w *Writer) Close() error {
 			b.uint32(h.CompressedSize)
 			b.uint32(h.UncompressedSize)
 		}
-		b.uint16(uint16(len(h.Name)))
+		b.uint16(uint16(len(h.Name.Raw())))
 		b.uint16(uint16(len(h.Extra)))
-		b.uint16(uint16(len(h.Comment)))
+		b.uint16(uint16(len(h.Comment.Raw())))
 		b.uint32(h.InternalAttrs)
 		b.uint32(h.ExternalAttrs)
 		if h.offset > uint32max {
@@ -112,13 +118,13 @@ func (w *Writer) Close() error {
 		if _, err := w.cw.Write(buf[:]); err != nil {
 			return err
 		}
-		if _, err := io.WriteString(w.cw, h.Name); err != nil {
+		if _, err := w.cw.Write(h.Name.Raw()); err != nil {
 			return err
 		}
 		if _, err := w.cw.Write(h.Extra); err != nil {
 			return err
 		}
-		if _, err := io.WriteString(w.cw, h.Comment); err != nil {
+		if _, err := w.cw.Write(h.Comment.Raw()); err != nil {
 			return err
 		}
 	}
@@ -163,7 +169,7 @@ func (w *Writer) Close() error {
 
 	// write end record
 	var buf [directoryEndLen]byte
-	comm := []byte(w.Comment)
+	comm := w.Comment.Raw()
 	b := writeBuf(buf[:])
 	b.uint32(uint32(directoryEndSignature))
 	b = b[4:]                   // skip over disk number and first disk number (2x uint16)
@@ -191,9 +197,11 @@ func (w *Writer) Close() error {
 // call to Create, CreateHeader, or Close.
 func (w *Writer) Create(name string, streamMode bool) (io.Writer, error) {
 	header := &FileHeader{
-		Name:   name,
-		Method: Deflate,
+		Name:    encstr.NewString(name),
+		Method:  Deflate,
+		Comment: encstr.NewString2([]byte{}, LocalEncoding),
 	}
+	header.Name.Convert(LocalEncoding)
 	return w.CreateHeader(header, streamMode)
 }
 
@@ -216,7 +224,7 @@ func (w *Writer) CreateHeader(fh *FileHeader, streamMode bool) (io.Writer, error
 	}
 
 	if streamMode {
-		fh.Flags |= 0x8 // we will write a data descriptor
+		fh.Flags |= useDataDescriptor // we will write a data descriptor
 	}
 
 	fh.CreatorVersion = fh.CreatorVersion&0xff00 | zipVersion20 // preserve compatibility byte
@@ -379,7 +387,7 @@ func (w *fileWriter) close() error {
 		fh.CompressedSize = uint32max
 		fh.UncompressedSize = uint32max
 		fh.ReaderVersion = zipVersion45 // requires 4.5 - File uses ZIP64 format extensions
-		fh.Flags |= 0x8                 // require  data descriptor
+		fh.Flags |= useDataDescriptor   // require  data descriptor
 	} else {
 		fh.CompressedSize = uint32(fh.CompressedSize64)
 		fh.UncompressedSize = uint32(fh.UncompressedSize64)
@@ -415,6 +423,14 @@ func (w *fileWriter) close() error {
 }
 
 func writeHeader(w io.Writer, h *FileHeader) error {
+	if h.Name.Encoding() == unicode.UTF8 {
+		h.Comment.Convert(unicode.UTF8)
+		h.Flags |= useUTF8
+	} else {
+		h.Comment.Convert(LocalEncoding)
+		h.Flags &^= useUTF8
+	}
+
 	var buf [fileHeaderLen]byte
 	b := writeBuf(buf[:])
 	b.uint32(uint32(fileHeaderSignature))
@@ -432,12 +448,12 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 		b.uint32(h.CompressedSize)
 		b.uint32(h.UncompressedSize)
 	}
-	b.uint16(uint16(len(h.Name)))
+	b.uint16(uint16(len(h.Name.Raw())))
 	b.uint16(uint16(len(h.FileExtra)))
 	if _, err := w.Write(buf[:]); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, h.Name); err != nil {
+	if _, err := w.Write(h.Name.Raw()); err != nil {
 		return err
 	}
 	_, err := w.Write(h.FileExtra)

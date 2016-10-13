@@ -10,6 +10,8 @@ import (
 	"math/rand"
 	"os"
 	"testing"
+
+	"github.com/hidez8891/encstr"
 )
 
 // TODO(adg): a more sophisticated test suite
@@ -112,7 +114,7 @@ func TestWriterOffset(t *testing.T) {
 
 		// write comment
 		comment := "zip archive comment"
-		w.Comment = comment
+		w.Comment.Set(comment)
 
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
@@ -127,7 +129,7 @@ func TestWriterOffset(t *testing.T) {
 			testReadFile(t, r.File[i], &wt)
 		}
 		// read comment
-		if r.Comment != comment {
+		if r.Comment.Str() != comment {
 			t.Fatalf("Archive comment: got %q, want %q", r.Comment, comment)
 		}
 	}
@@ -135,8 +137,9 @@ func TestWriterOffset(t *testing.T) {
 
 func testCreate(t *testing.T, w *Writer, wt *WriteTest, streamMode bool) {
 	header := &FileHeader{
-		Name:   wt.Name,
-		Method: wt.Method,
+		Name:    encstr.NewString(wt.Name),
+		Method:  wt.Method,
+		Comment: encstr.NewString(""),
 	}
 	if wt.Mode != 0 {
 		header.SetMode(wt.Mode)
@@ -152,7 +155,7 @@ func testCreate(t *testing.T, w *Writer, wt *WriteTest, streamMode bool) {
 }
 
 func testReadFile(t *testing.T, f *File, wt *WriteTest) {
-	if f.Name != wt.Name {
+	if f.Name.Str() != wt.Name {
 		t.Fatalf("File name: got %q, want %q", f.Name, wt.Name)
 	}
 	testFileMode(t, wt.Name, f, wt.Mode)
@@ -182,8 +185,9 @@ func BenchmarkCompressedZipGarbage(b *testing.B) {
 		zw := NewWriter(&buf)
 		for j := 0; j < 3; j++ {
 			w, _ := zw.CreateHeader(&FileHeader{
-				Name:   "foo",
-				Method: Deflate,
+				Name:    encstr.NewString("foo"),
+				Method:  Deflate,
+				Comment: encstr.NewString(""),
 			}, true)
 			w.Write(bigBuf)
 		}
