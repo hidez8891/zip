@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/hidez8891/encstr"
+	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 )
 
@@ -73,7 +74,7 @@ const (
 )
 
 // LocalEncoding is default local encoding
-var LocalEncoding = charmap.CodePage437
+var LocalEncoding encoding.Encoding = charmap.CodePage437
 
 // FileHeader describes a file within a zip file.
 // See the zip spec for details.
