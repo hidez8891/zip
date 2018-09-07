@@ -405,6 +405,65 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 	return err
 }
 
+// CopyFile adds a file to the zip archive using the provided File
+// from the zip.Reader.
+func (w *Writer) CopyFile(f *File) error {
+	if w.last != nil && !w.last.closed {
+		if err := w.last.close(); err != nil {
+			return err
+		}
+	}
+	w.last = nil
+
+	if len(w.dir) > 0 && w.dir[len(w.dir)-1].FileHeader.Name == f.FileHeader.Name {
+		// See https://golang.org/issue/11144 confusion.
+		return errors.New("archive/zip: invalid duplicate FileHeader")
+	}
+
+	// Write header
+	h := &header{
+		FileHeader: &f.FileHeader,
+		offset:     uint64(w.cw.count),
+	}
+	w.dir = append(w.dir, h)
+	if err := writeHeader(w.cw, &f.FileHeader); err != nil {
+		return err
+	}
+
+	// Write compressed data
+	for wn := uint64(0); wn < f.CompressedSize64; {
+		r, err := f.rawReader()
+		if err != nil {
+			return err
+		}
+		n, err := io.Copy(w.cw, r)
+		if err != nil {
+			return err
+		}
+		wn += uint64(n)
+	}
+
+	// Write data descriptor
+	var buf []byte
+	if f.FileHeader.isZip64() {
+		buf = make([]byte, dataDescriptor64Len)
+	} else {
+		buf = make([]byte, dataDescriptorLen)
+	}
+	b := writeBuf(buf)
+	b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
+	b.uint32(f.FileHeader.CRC32)
+	if f.FileHeader.isZip64() {
+		b.uint64(f.FileHeader.CompressedSize64)
+		b.uint64(f.FileHeader.UncompressedSize64)
+	} else {
+		b.uint32(f.FileHeader.CompressedSize)
+		b.uint32(f.FileHeader.UncompressedSize)
+	}
+	_, err := w.cw.Write(buf)
+	return err
+}
+
 // RegisterCompressor registers or overrides a custom compressor for a specific
 // method ID. If a compressor for a given method is not found, Writer will
 // default to looking up the compressor at the package level.

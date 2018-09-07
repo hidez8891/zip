@@ -179,6 +179,17 @@ func (f *File) Open() (io.ReadCloser, error) {
 	return rc, nil
 }
 
+// rawReader returns a io.Reader that provides access to the File's compressed contents.
+func (f *File) rawReader() (io.Reader, error) {
+	bodyOffset, err := f.findBodyOffset()
+	if err != nil {
+		return nil, err
+	}
+	size := int64(f.CompressedSize64)
+	r := io.NewSectionReader(f.zipr, f.headerOffset+bodyOffset, size)
+	return r, nil
+}
+
 type checksumReader struct {
 	rc    io.ReadCloser
 	hash  hash.Hash32

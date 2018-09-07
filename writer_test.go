@@ -353,6 +353,60 @@ func TestWriterDirAttributes(t *testing.T) {
 	}
 }
 
+func TestWriterCopy(t *testing.T) {
+	largeData := make([]byte, 1<<17)
+	if _, err := rand.Read(largeData); err != nil {
+		t.Fatal("rand.Read failed:", err)
+	}
+	writeTests[1].Data = largeData
+	defer func() {
+		writeTests[1].Data = nil
+	}()
+
+	// write a zip file
+	buf := new(bytes.Buffer)
+	w := NewWriter(buf)
+	for _, wt := range writeTests {
+		testCreate(t, w, &wt)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	w = nil
+
+	// read it
+	r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// copy a zip file
+	bufCopy := new(bytes.Buffer)
+	wCopy := NewWriter(bufCopy)
+	for _, rf := range r.File {
+		err := wCopy.CopyFile(rf)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := wCopy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	wCopy = nil
+
+	r = nil
+	buf = nil
+
+	// read it back
+	r, err = NewReader(bytes.NewReader(bufCopy.Bytes()), int64(bufCopy.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, wt := range writeTests {
+		testReadFile(t, r.File[i], &wt)
+	}
+}
+
 func testCreate(t *testing.T, w *Writer, wt *WriteTest) {
 	header := &FileHeader{
 		Name:   wt.Name,
