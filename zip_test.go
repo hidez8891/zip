@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"internal/race"
-	"internal/testenv"
 	"io"
 	"io/ioutil"
 	"runtime"
@@ -23,9 +21,6 @@ import (
 )
 
 func TestOver65kFiles(t *testing.T) {
-	if testing.Short() && testenv.Builder() == "" {
-		t.Skip("skipping in short mode")
-	}
 	buf := new(bytes.Buffer)
 	w := NewWriter(buf)
 	const nFiles = (1 << 16) + 42
@@ -268,9 +263,6 @@ func TestZip64EdgeCase(t *testing.T) {
 // Tests that we generate a zip64 file if the directory at offset
 // 0xFFFFFFFF, but not before.
 func TestZip64DirectoryOffset(t *testing.T) {
-	if testing.Short() && race.Enabled {
-		t.Skip("skipping in short mode")
-	}
 	t.Parallel()
 	const filename = "huge.txt"
 	gen := func(wantOff uint64) func(*Writer) {
@@ -313,9 +305,6 @@ func TestZip64DirectoryOffset(t *testing.T) {
 
 // At 16k records, we need to generate a zip64 file.
 func TestZip64ManyRecords(t *testing.T) {
-	if testing.Short() && race.Enabled {
-		t.Skip("skipping in short mode")
-	}
 	t.Parallel()
 	gen := func(numRec int) func(*Writer) {
 		return func(w *Writer) {
