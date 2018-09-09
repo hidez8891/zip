@@ -454,6 +454,61 @@ func TestWriterCopyFile(t *testing.T) {
 	}
 }
 
+func TestWriterNoDataDescriptor(t *testing.T) {
+	srcFile := "testdata/dd.zip"
+	compareFile := "testdata/no-dd.zip"
+
+	// create zip file
+	zr, err := OpenReader(srcFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	tmp, err := ioutil.TempFile("testdata", "no-dd-tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	zw := NewWriter(tmp)
+	for _, f := range zr.File {
+		f.Flags &= ^FlagDataDescriptor
+		err := zw.CopyFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	zw.Close()
+
+	// file compare
+	cmp, err := os.Open(compareFile)
+	if err != nil {
+		t.Fatal(nil)
+	}
+	defer cmp.Close()
+
+	cmpBufWriter := new(bytes.Buffer)
+	io.Copy(cmpBufWriter, cmp)
+	cmpBuf := cmpBufWriter.Bytes()
+
+	tmpBufWriter := new(bytes.Buffer)
+	tmp.Seek(0, os.SEEK_SET)
+	io.Copy(tmpBufWriter, tmp)
+	tmpBuf := tmpBufWriter.Bytes()
+
+	if len(cmpBuf) != len(tmpBuf) {
+		t.Fatalf("Create file size is worng: want %d, get %d", len(cmpBuf), len(tmpBuf))
+	}
+	for i := 0; i < len(cmpBuf); i++ {
+		if cmpBuf[i] != tmpBuf[i] {
+			t.Fatalf("Create file data is worng: want %x, get %x [pos: %d]",
+				cmpBuf[i], tmpBuf[i], i)
+		}
+	}
+}
+
 func testCreate(t *testing.T, w *Writer, wt *WriteTest) {
 	header := &FileHeader{
 		Name:   wt.Name,

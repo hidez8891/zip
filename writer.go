@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	flagDataDescriptor uint16 = 0x8
+	FlagDataDescriptor uint16 = 0x8
 )
 
 var (
@@ -394,9 +394,9 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 	b.uint16(h.Method)
 	b.uint16(h.ModifiedTime)
 	b.uint16(h.ModifiedDate)
-	if h.Flags&flagDataDescriptor != 0 || h.isZip64() {
+	if h.Flags&FlagDataDescriptor != 0 || h.isZip64() {
 		// has data descriptor
-		h.Flags |= flagDataDescriptor
+		h.Flags |= FlagDataDescriptor
 		b.uint32(0) // since we are writing a data descriptor crc32,
 		b.uint32(0) // compressed size,
 		b.uint32(0) // and uncompressed size should be zero
@@ -456,7 +456,7 @@ func (w *Writer) CopyFile(f *File) error {
 	}
 
 	// no data descriptor
-	if f.FileHeader.Flags&flagDataDescriptor == 0 {
+	if f.FileHeader.Flags&FlagDataDescriptor == 0 {
 		return nil
 	}
 
@@ -542,7 +542,7 @@ func (w *fileWriter) close() error {
 	fh.UncompressedSize64 = uint64(w.rawCount.count)
 
 	if fh.isZip64() {
-		fh.Flags |= flagDataDescriptor
+		fh.Flags |= FlagDataDescriptor
 		fh.CompressedSize = uint32max
 		fh.UncompressedSize = uint32max
 		fh.ReaderVersion = zipVersion45 // requires 4.5 - File uses ZIP64 format extensions
@@ -551,8 +551,23 @@ func (w *fileWriter) close() error {
 		fh.UncompressedSize = uint32(fh.UncompressedSize64)
 	}
 
-	if fh.Flags&flagDataDescriptor == 0 {
-		return errors.New("Unimplemented")
+	if fh.Flags&FlagDataDescriptor == 0 {
+		// Update local file header.
+		// This operation needs WriteAt() function.
+		wat, ok := w.rawCount.w.(io.WriterAt)
+		if !ok {
+			return errors.New("If you don't use data descriptor, you need io.WriterAt")
+		}
+
+		var buf [4 * 3]byte
+		b := writeBuf(buf[:])
+		b.uint32(fh.CRC32)
+		b.uint32(fh.CompressedSize)
+		b.uint32(fh.UncompressedSize)
+
+		offset := int64(w.header.offset) + int64(14)
+		_, err := wat.WriteAt(buf[:], offset)
+		return err
 	} else {
 		// Write data descriptor. This is more complicated than one would
 		// think, see e.g. comments in zipfile.c:putextended() and
