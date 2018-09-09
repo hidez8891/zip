@@ -13,6 +13,7 @@ import (
 	"hash"
 	"io"
 	"io/ioutil"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -775,4 +776,51 @@ func (zeros) Read(p []byte) (int, error) {
 		p[i] = 0
 	}
 	return len(p), nil
+}
+
+func TestCopyZip(t *testing.T) {
+	tests := []string{
+		"testdata/dd.zip",    // use data descriptor
+		"testdata/no-dd.zip", // unuse data descriptor
+	}
+
+	for _, tt := range tests {
+		file, err := os.Open(tt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+
+		buf := new(bytes.Buffer)
+		_, err = io.Copy(buf, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		zr, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		bufW := new(bytes.Buffer)
+		zw := NewWriter(bufW)
+		for _, f := range zr.File {
+			err := zw.CopyFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		zw.Close()
+
+		byteR := buf.Bytes()
+		byteW := bufW.Bytes()
+		if len(byteR) != len(byteW) {
+			t.Fatalf("Copy file size is different: want %d, get %d", len(byteR), len(byteW))
+		}
+		for i := 0; i < len(byteR); i++ {
+			if byteR[i] != byteW[i] {
+				t.Fatalf("Copy file data is different")
+			}
+		}
+	}
 }

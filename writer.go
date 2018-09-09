@@ -15,6 +15,10 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	flagDataDescriptor uint16 = 0x8
+)
+
 var (
 	errLongName  = errors.New("zip: FileHeader.Name too long")
 	errLongExtra = errors.New("zip: FileHeader.Extra too long")
@@ -390,9 +394,17 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 	b.uint16(h.Method)
 	b.uint16(h.ModifiedTime)
 	b.uint16(h.ModifiedDate)
-	b.uint32(0) // since we are writing a data descriptor crc32,
-	b.uint32(0) // compressed size,
-	b.uint32(0) // and uncompressed size should be zero
+	if h.Flags&flagDataDescriptor != 0 || h.isZip64() {
+		// has data descriptor
+		h.Flags |= flagDataDescriptor
+		b.uint32(0) // since we are writing a data descriptor crc32,
+		b.uint32(0) // compressed size,
+		b.uint32(0) // and uncompressed size should be zero
+	} else {
+		b.uint32(h.CRC32)
+		b.uint32(h.CompressedSize)
+		b.uint32(h.UncompressedSize)
+	}
 	b.uint16(uint16(len(h.Name)))
 	b.uint16(uint16(len(h.Extra)))
 	if _, err := w.Write(buf[:]); err != nil {
@@ -441,6 +453,11 @@ func (w *Writer) CopyFile(f *File) error {
 			return err
 		}
 		wn += uint64(n)
+	}
+
+	// no data descriptor
+	if f.FileHeader.Flags&flagDataDescriptor == 0 {
+		return nil
 	}
 
 	// Write data descriptor
@@ -525,6 +542,7 @@ func (w *fileWriter) close() error {
 	fh.UncompressedSize64 = uint64(w.rawCount.count)
 
 	if fh.isZip64() {
+		fh.Flags |= flagDataDescriptor
 		fh.CompressedSize = uint32max
 		fh.UncompressedSize = uint32max
 		fh.ReaderVersion = zipVersion45 // requires 4.5 - File uses ZIP64 format extensions
@@ -533,29 +551,33 @@ func (w *fileWriter) close() error {
 		fh.UncompressedSize = uint32(fh.UncompressedSize64)
 	}
 
-	// Write data descriptor. This is more complicated than one would
-	// think, see e.g. comments in zipfile.c:putextended() and
-	// http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=7073588.
-	// The approach here is to write 8 byte sizes if needed without
-	// adding a zip64 extra in the local header (too late anyway).
-	var buf []byte
-	if fh.isZip64() {
-		buf = make([]byte, dataDescriptor64Len)
+	if fh.Flags&flagDataDescriptor == 0 {
+		return errors.New("Unimplemented")
 	} else {
-		buf = make([]byte, dataDescriptorLen)
+		// Write data descriptor. This is more complicated than one would
+		// think, see e.g. comments in zipfile.c:putextended() and
+		// http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=7073588.
+		// The approach here is to write 8 byte sizes if needed without
+		// adding a zip64 extra in the local header (too late anyway).
+		var buf []byte
+		if fh.isZip64() {
+			buf = make([]byte, dataDescriptor64Len)
+		} else {
+			buf = make([]byte, dataDescriptorLen)
+		}
+		b := writeBuf(buf)
+		b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
+		b.uint32(fh.CRC32)
+		if fh.isZip64() {
+			b.uint64(fh.CompressedSize64)
+			b.uint64(fh.UncompressedSize64)
+		} else {
+			b.uint32(fh.CompressedSize)
+			b.uint32(fh.UncompressedSize)
+		}
+		_, err := w.zipw.Write(buf)
+		return err
 	}
-	b := writeBuf(buf)
-	b.uint32(dataDescriptorSignature) // de-facto standard, required by OS X
-	b.uint32(fh.CRC32)
-	if fh.isZip64() {
-		b.uint64(fh.CompressedSize64)
-		b.uint64(fh.UncompressedSize64)
-	} else {
-		b.uint32(fh.CompressedSize)
-		b.uint32(fh.UncompressedSize)
-	}
-	_, err := w.zipw.Write(buf)
-	return err
 }
 
 type countWriter struct {
