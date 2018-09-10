@@ -377,15 +377,7 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 	return ow, nil
 }
 
-func writeHeader(w io.Writer, h *FileHeader) error {
-	const maxUint16 = 1<<16 - 1
-	if len(h.Name) > maxUint16 {
-		return errLongName
-	}
-	if len(h.Extra) > maxUint16 {
-		return errLongExtra
-	}
-
+func encodeHeader(h *FileHeader) []byte {
 	var buf [fileHeaderLen]byte
 	b := writeBuf(buf[:])
 	b.uint32(uint32(fileHeaderSignature))
@@ -407,6 +399,19 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 	}
 	b.uint16(uint16(len(h.Name)))
 	b.uint16(uint16(len(h.Extra)))
+	return buf[:]
+}
+
+func writeHeader(w io.Writer, h *FileHeader) error {
+	const maxUint16 = 1<<16 - 1
+	if len(h.Name) > maxUint16 {
+		return errLongName
+	}
+	if len(h.Extra) > maxUint16 {
+		return errLongExtra
+	}
+
+	buf := encodeHeader(h)
 	if _, err := w.Write(buf[:]); err != nil {
 		return err
 	}
@@ -414,6 +419,31 @@ func writeHeader(w io.Writer, h *FileHeader) error {
 		return err
 	}
 	_, err := w.Write(h.Extra)
+	return err
+}
+
+func rewriteHeader(w io.WriterAt, h *FileHeader, off int64) error {
+	const maxUint16 = 1<<16 - 1
+	if len(h.Name) > maxUint16 {
+		return errLongName
+	}
+	if len(h.Extra) > maxUint16 {
+		return errLongExtra
+	}
+
+	buf := encodeHeader(h)
+	if _, err := w.WriteAt(buf[:], off); err != nil {
+		return err
+	}
+	off += int64(len(buf))
+
+	buf = []byte(h.Name)
+	if _, err := w.WriteAt(buf, off); err != nil {
+		return err
+	}
+	off += int64(len(buf))
+
+	_, err := w.WriteAt(h.Extra, off)
 	return err
 }
 
@@ -559,15 +589,8 @@ func (w *fileWriter) close() error {
 			return errors.New("If you don't use data descriptor, you need io.WriterAt")
 		}
 
-		var buf [4 * 3]byte
-		b := writeBuf(buf[:])
-		b.uint32(fh.CRC32)
-		b.uint32(fh.CompressedSize)
-		b.uint32(fh.UncompressedSize)
-
-		offset := int64(w.header.offset) + int64(14)
-		_, err := wat.WriteAt(buf[:], offset)
-		return err
+		offset := int64(w.header.offset)
+		return rewriteHeader(wat, fh, offset)
 	} else {
 		// Write data descriptor. This is more complicated than one would
 		// think, see e.g. comments in zipfile.c:putextended() and
