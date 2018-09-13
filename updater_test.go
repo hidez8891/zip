@@ -7,6 +7,7 @@ package zip
 import (
 	"bytes"
 	"io"
+	"os"
 	"testing"
 )
 
@@ -34,7 +35,14 @@ var updateTest = ZipTest{
 
 func TestUpdaterOnlyRead(t *testing.T) {
 	testcase := updateTest.File
-	z, err := NewUpdater("testdata/" + updateTest.Name)
+	file, err := os.Open("testdata/" + updateTest.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	st, _ := file.Stat()
+	z, err := NewUpdater(file, st.Size())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +67,14 @@ func TestUpdaterAddFile(t *testing.T) {
 		Content: []byte("text string"),
 	}
 
-	z, err := NewUpdater("testdata/" + updateTest.Name)
+	file, err := os.Open("testdata/" + updateTest.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	st, _ := file.Stat()
+	z, err := NewUpdater(file, st.Size())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +124,14 @@ func TestUpdaterUpdateFile(t *testing.T) {
 		Content: []byte("update string"),
 	}
 
-	z, err := NewUpdater("testdata/" + updateTest.Name)
+	file, err := os.Open("testdata/" + updateTest.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	st, _ := file.Stat()
+	z, err := NewUpdater(file, st.Size())
 	if err != nil {
 		t.Fatal(err)
 	}

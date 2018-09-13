@@ -10,6 +10,12 @@ import (
 	"io"
 )
 
+// WriteWriterAt is the interface that groups the basic Write and WriteAt methods.
+type WriteWriterAt interface {
+	io.Writer
+	io.WriterAt
+}
+
 // A WriteCloser implements the io.WriteCloser
 type WriteCloser struct {
 	writer io.Writer
@@ -28,33 +34,31 @@ func (w *WriteCloser) Close() error {
 
 // Updater provides editing of zip files.
 type Updater struct {
-	path    string
 	files   []string
 	headers map[string]*FileHeader
 	entries map[string]*bytes.Buffer
-	r       *ReadCloser
+	r       *Reader
 }
 
-// NewUpdater returns a new Updater from path.
-func NewUpdater(path string) (*Updater, error) {
-	r, err := OpenReader(path)
+// NewUpdater returns a new Updater from r and size.
+func NewUpdater(r io.ReaderAt, size int64) (*Updater, error) {
+	zr, err := NewReader(r, size)
 	if err != nil {
 		return nil, err
 	}
 
-	files := make([]string, len(r.File))
-	headers := make(map[string]*FileHeader, len(r.File))
-	for i, zf := range r.File {
+	files := make([]string, len(zr.File))
+	headers := make(map[string]*FileHeader, len(zr.File))
+	for i, zf := range zr.File {
 		files[i] = zf.Name
 		headers[zf.Name] = &zf.FileHeader
 	}
 
 	return &Updater{
-		path:    path,
 		files:   files,
 		headers: headers,
 		entries: make(map[string]*bytes.Buffer),
-		r:       r,
+		r:       zr,
 	}, nil
 }
 
@@ -137,11 +141,6 @@ func (u *Updater) Update(name string) (io.WriteCloser, error) {
 
 // Save saves the changes and ends editing.
 func (u *Updater) Save() error {
-	err := u.r.Close()
-	if err != nil {
-		return err
-	}
-
 	// tempfile 作成
 	// foreach files
 	//   書き込み領域を取得
@@ -155,13 +154,8 @@ func (u *Updater) Save() error {
 	return errors.New("internal error: Unimplemented")
 }
 
-// SaveAs saves the changes to path and ends editing.
-func (u *Updater) SaveAs(path string) error {
-	err := u.r.Close()
-	if err != nil {
-		return err
-	}
-
+// SaveAs saves the changes to w.
+func (u *Updater) SaveAs(w WriteWriterAt) error {
 	// path 作成
 	// foreach files
 	//   書き込み領域を取得
@@ -176,7 +170,8 @@ func (u *Updater) Cancel() error {
 	u.files = make([]string, 0)
 	u.headers = make(map[string]*FileHeader, 0)
 	u.entries = make(map[string]*bytes.Buffer, 0)
-	return u.r.Close()
+	u.r = nil
+	return nil
 }
 
 // Close discards the changes and ends editing.
