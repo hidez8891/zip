@@ -7,6 +7,7 @@ package zip
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -139,30 +140,57 @@ func (u *Updater) Update(name string) (io.WriteCloser, error) {
 	return wc, nil
 }
 
-// Save saves the changes and ends editing.
-func (u *Updater) Save() error {
-	// tempfile 作成
-	// foreach files
-	//   書き込み領域を取得
-	//   ファイルを書き込み
-	// tempfile.close
-	//
-	// u.path を old に rename
-	// tempfile を u.path に rename
-	// old を削除
-
-	return errors.New("internal error: Unimplemented")
-}
-
 // SaveAs saves the changes to w.
-func (u *Updater) SaveAs(w WriteWriterAt) error {
-	// path 作成
-	// foreach files
-	//   書き込み領域を取得
-	//   ファイルを書き込み
-	// path.close
+// If data descriptor is not used, w must implement io.WriterAt.
+func (u *Updater) SaveAs(w io.Writer) error {
+	z := NewWriter(w)
 
-	return errors.New("internal error: Unimplemented")
+	for _, name := range u.files {
+		offset := z.cw.count
+
+		fh := u.headers[name]
+		if err := writeHeader(z.cw, fh); err != nil {
+			return err
+		}
+		z.dir = append(z.dir, &header{
+			FileHeader: fh,
+			offset:     uint64(offset),
+		})
+
+		if entry, ok := u.entries[name]; ok {
+			// write new file
+			start := z.cw.count - offset
+			end := start + int64(fh.CompressedSize64)
+
+			bw := bytes.NewReader(entry.Bytes()[start:end])
+			if _, err := io.Copy(z.cw, bw); err != nil {
+				return err
+			}
+		} else {
+			// write zip's content
+			var zfile *File
+			for _, zf := range u.r.File {
+				if zf.Name == name {
+					zfile = zf
+				}
+			}
+			if zfile == nil {
+				return fmt.Errorf("internal error: %s is not exist", name)
+			}
+
+			bodyOffset, err := zfile.findBodyOffset()
+			if err != nil {
+				return err
+			}
+			size := int64(zfile.CompressedSize64)
+			r := io.NewSectionReader(zfile.zipr, zfile.headerOffset+bodyOffset, size)
+			if _, err := io.Copy(z.cw, r); err != nil {
+				return err
+			}
+		}
+	}
+
+	return z.Close()
 }
 
 // Cancel discards the changes and ends editing.

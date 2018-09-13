@@ -172,6 +172,76 @@ func TestUpdaterUpdateFile(t *testing.T) {
 	}
 }
 
+func TestUpdaterSaveAsFile(t *testing.T) {
+	testcase := updateTest.File
+	updatefile := ZipTestFile{
+		Name:    "dir/bar",
+		Content: []byte("update string"),
+	}
+	addfile := ZipTestFile{
+		Name:    "test",
+		Content: []byte("text string"),
+	}
+
+	file, err := os.Open("testdata/" + updateTest.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	st, _ := file.Stat()
+	z, err := NewUpdater(file, st.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer z.Close()
+
+	// add file
+	wc, _ := z.Create(addfile.Name)
+	wc.Write(addfile.Content)
+	wc.Close()
+
+	// update file
+	wc, _ = z.Update(updatefile.Name)
+	wc.Write(updatefile.Content)
+	wc.Close()
+
+	// save
+	wdump := new(bytes.Buffer)
+	err = z.SaveAs(wdump)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check file
+	zr, err := NewReader(bytes.NewReader(wdump.Bytes()), int64(wdump.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files := zr.File
+	if len(files) != len(testcase)+1 {
+		t.Fatalf("file count=%d, want %d", len(files), len(testcase)+1)
+	}
+
+	for i, ztf := range testcase {
+		if files[i].Name != ztf.Name {
+			t.Errorf("name=%q, want %q", files[i].Name, ztf.Name)
+		}
+		if files[i].Name == updatefile.Name {
+			compareContents(t, z, updatefile)
+		} else {
+			compareContents(t, z, ztf)
+		}
+	}
+
+	last := files[len(files)-1]
+	if last.Name != addfile.Name {
+		t.Errorf("name=%q, want %q", last.Name, addfile.Name)
+	}
+	compareContents(t, z, addfile)
+}
+
 func compareContents(t *testing.T, z *Updater, ztf ZipTestFile) {
 	t.Helper()
 
