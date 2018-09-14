@@ -26,6 +26,7 @@ var (
 
 // Writer implements a zip file writer.
 type Writer struct {
+	raww        io.Writer
 	cw          *countWriter
 	dir         []*header
 	last        *fileWriter
@@ -45,7 +46,7 @@ type header struct {
 
 // NewWriter returns a new Writer writing a zip file to w.
 func NewWriter(w io.Writer) *Writer {
-	return &Writer{cw: &countWriter{w: bufio.NewWriter(w)}}
+	return &Writer{cw: &countWriter{w: bufio.NewWriter(w)}, raww: w}
 }
 
 // SetOffset sets the offset of the beginning of the zip data within the
@@ -320,7 +321,9 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 		eb.uint16(5)  // Size: SizeOf(uint8) + SizeOf(uint32)
 		eb.uint8(1)   // Flags: ModTime
 		eb.uint32(mt) // ModTime
-		fh.Extra = append(fh.Extra, mbuf[:]...)
+
+		// Create a new Extra fields. (prevent infinite append)
+		fh.Extra = mbuf[:]
 	}
 
 	var (
@@ -348,9 +351,17 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 
 		ow = dirWriter{}
 	} else {
-		fh.Flags |= 0x8 // we will write a data descriptor
+		fh.Flags |= FlagDataDescriptor // we will write a data descriptor
+
+		// When using data descriptor, these fields must be 0
+		fh.CRC32 = 0
+		fh.CompressedSize = 0
+		fh.CompressedSize64 = 0
+		fh.UncompressedSize = 0
+		fh.UncompressedSize64 = 0
 
 		fw = &fileWriter{
+			raww:      w.raww,
 			zipw:      w.cw,
 			compCount: &countWriter{w: w.cw},
 			crc32:     crc32.NewIEEE(),
@@ -540,6 +551,7 @@ func (dirWriter) Write(b []byte) (int, error) {
 
 type fileWriter struct {
 	*header
+	raww      io.Writer
 	zipw      io.Writer
 	rawCount  *countWriter
 	comp      io.WriteCloser
@@ -584,11 +596,12 @@ func (w *fileWriter) close() error {
 	if fh.Flags&FlagDataDescriptor == 0 {
 		// Update local file header.
 		// This operation needs WriteAt() function.
-		wat, ok := w.rawCount.w.(io.WriterAt)
+		wat, ok := w.raww.(io.WriterAt)
 		if !ok {
 			return errors.New("If you don't use data descriptor, you need io.WriterAt")
 		}
 
+		w.zipw.(*countWriter).w.(*bufio.Writer).Flush()
 		offset := int64(w.header.offset)
 		return rewriteHeader(wat, fh, offset)
 	} else {

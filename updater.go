@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	bytesEX "github.com/hidez8891/zip/internal/bytes"
 )
 
 // WriteWriterAt is the interface that groups the basic Write and WriteAt methods.
@@ -37,7 +39,7 @@ func (w *WriteCloser) Close() error {
 type Updater struct {
 	files   []string
 	headers map[string]*FileHeader
-	entries map[string]*bytes.Buffer
+	entries map[string]*bytesEX.BufferAt
 	r       *Reader
 }
 
@@ -58,7 +60,7 @@ func NewUpdater(r io.ReaderAt, size int64) (*Updater, error) {
 	return &Updater{
 		files:   files,
 		headers: headers,
-		entries: make(map[string]*bytes.Buffer),
+		entries: make(map[string]*bytesEX.BufferAt),
 		r:       zr,
 	}, nil
 }
@@ -101,7 +103,7 @@ func (u *Updater) Create(name string) (io.WriteCloser, error) {
 		return nil, errors.New("invalid duplicate file name")
 	}
 
-	u.entries[name] = new(bytes.Buffer)
+	u.entries[name] = new(bytesEX.BufferAt)
 	z := NewWriter(u.entries[name])
 
 	w, err := z.Create(name)
@@ -123,14 +125,17 @@ func (u *Updater) Update(name string) (io.WriteCloser, error) {
 	if _, ok := u.headers[name]; !ok {
 		return nil, errors.New("not found file name")
 	}
+	useDataDescriptor := u.headers[name].Flags&FlagDataDescriptor != 0
 
-	u.entries[name] = new(bytes.Buffer)
+	u.entries[name] = new(bytesEX.BufferAt)
 	z := NewWriter(u.entries[name])
 
-	//w, err := z.CreateHeader(u.headers[name]) //TODO
-	w, err := z.Create(name)
+	w, err := z.CreateHeader(u.headers[name])
 	if err != nil {
 		return nil, err
+	}
+	if !useDataDescriptor {
+		z.dir[0].FileHeader.Flags &^= FlagDataDescriptor
 	}
 	u.headers[name] = z.dir[0].FileHeader
 
@@ -213,7 +218,7 @@ func (u *Updater) SaveAs(w io.Writer) error {
 func (u *Updater) Cancel() error {
 	u.files = make([]string, 0)
 	u.headers = make(map[string]*FileHeader, 0)
-	u.entries = make(map[string]*bytes.Buffer, 0)
+	u.entries = make(map[string]*bytesEX.BufferAt, 0)
 	u.r = nil
 	return nil
 }
