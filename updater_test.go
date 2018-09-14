@@ -48,20 +48,13 @@ func TestUpdaterOnlyRead(t *testing.T) {
 	}
 	defer z.Close()
 
-	files := z.Files()
-	if len(testcase) != len(files) {
-		t.Fatalf("file count=%d, want %d", len(files), len(testcase))
-	}
-	for i, ztf := range testcase {
-		if files[i].Name != ztf.Name {
-			t.Errorf("name=%q, want %q", files[i].Name, ztf.Name)
-		}
-		compareContents(t, z, ztf)
-	}
+	// check file
+	compareContents(t, z, testcase)
 }
 
 func TestUpdaterAddFile(t *testing.T) {
-	testcase := updateTest.File
+	testcase := make([]ZipTestFile, len(updateTest.File))
+	copy(testcase, updateTest.File)
 	testfile := ZipTestFile{
 		Name:    "test",
 		Content: []byte("text string"),
@@ -98,27 +91,13 @@ func TestUpdaterAddFile(t *testing.T) {
 	}
 
 	// check file
-	files := z.Files()
-	if len(files) != len(testcase)+1 {
-		t.Fatalf("file count=%d, want %d", len(files), len(testcase)+1)
-	}
-
-	for i, ztf := range testcase {
-		if files[i].Name != ztf.Name {
-			t.Errorf("name=%q, want %q", files[i].Name, ztf.Name)
-		}
-		compareContents(t, z, ztf)
-	}
-
-	last := files[len(files)-1]
-	if last.Name != testfile.Name {
-		t.Errorf("name=%q, want %q", last.Name, testfile.Name)
-	}
-	compareContents(t, z, testfile)
+	testcase = append(testcase, testfile)
+	compareContents(t, z, testcase)
 }
 
 func TestUpdaterUpdateFile(t *testing.T) {
-	testcase := updateTest.File
+	testcase := make([]ZipTestFile, len(updateTest.File))
+	copy(testcase, updateTest.File)
 	testfile := ZipTestFile{
 		Name:    "dir/bar",
 		Content: []byte("update string"),
@@ -155,25 +134,17 @@ func TestUpdaterUpdateFile(t *testing.T) {
 	}
 
 	// check file
-	files := z.Files()
-	if len(files) != len(testcase) {
-		t.Fatalf("file count=%d, want %d", len(files), len(testcase))
-	}
-
-	for i, ztf := range testcase {
-		if files[i].Name != ztf.Name {
-			t.Errorf("name=%q, want %q", files[i].Name, ztf.Name)
-		}
-		if files[i].Name == testfile.Name {
-			compareContents(t, z, testfile)
-		} else {
-			compareContents(t, z, ztf)
+	for i := range testcase {
+		if testcase[i].Name == testfile.Name {
+			testcase[i] = testfile
 		}
 	}
+	compareContents(t, z, testcase)
 }
 
 func TestUpdaterSaveAsFile(t *testing.T) {
-	testcase := updateTest.File
+	testcase := make([]ZipTestFile, len(updateTest.File))
+	copy(testcase, updateTest.File)
 	updatefile := ZipTestFile{
 		Name:    "dir/bar",
 		Content: []byte("update string"),
@@ -197,52 +168,65 @@ func TestUpdaterSaveAsFile(t *testing.T) {
 	defer z.Close()
 
 	// add file
-	wc, _ := z.Create(addfile.Name)
-	wc.Write(addfile.Content)
-	wc.Close()
+	wc, err := z.Create(addfile.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wc.Write(addfile.Content); err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	// update file
-	wc, _ = z.Update(updatefile.Name)
-	wc.Write(updatefile.Content)
-	wc.Close()
+	wc, err = z.Update(updatefile.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wc.Write(updatefile.Content); err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	// save
 	wdump := new(bytes.Buffer)
-	err = z.SaveAs(wdump)
-	if err != nil {
+	if err := z.SaveAs(wdump); err != nil {
 		t.Fatal(err)
 	}
 
 	// check file
-	zr, err := NewReader(bytes.NewReader(wdump.Bytes()), int64(wdump.Len()))
+	zr, err := NewUpdater(bytes.NewReader(wdump.Bytes()), int64(wdump.Len()))
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	files := zr.File
-	if len(files) != len(testcase)+1 {
-		t.Fatalf("file count=%d, want %d", len(files), len(testcase)+1)
+	for i := range testcase {
+		if testcase[i].Name == updatefile.Name {
+			testcase[i] = updatefile
+		}
 	}
+	testcase = append(testcase, addfile)
+	compareContents(t, zr, testcase)
+}
 
+func compareContents(t *testing.T, z *Updater, testcase []ZipTestFile) {
+	t.Helper()
+
+	files := z.Files()
+	if len(testcase) != len(files) {
+		t.Fatalf("file count=%d, want %d", len(files), len(testcase))
+	}
 	for i, ztf := range testcase {
 		if files[i].Name != ztf.Name {
 			t.Errorf("name=%q, want %q", files[i].Name, ztf.Name)
 		}
-		if files[i].Name == updatefile.Name {
-			compareContents(t, z, updatefile)
-		} else {
-			compareContents(t, z, ztf)
-		}
+		compareContent(t, z, ztf)
 	}
-
-	last := files[len(files)-1]
-	if last.Name != addfile.Name {
-		t.Errorf("name=%q, want %q", last.Name, addfile.Name)
-	}
-	compareContents(t, z, addfile)
 }
 
-func compareContents(t *testing.T, z *Updater, ztf ZipTestFile) {
+func compareContent(t *testing.T, z *Updater, ztf ZipTestFile) {
 	t.Helper()
 
 	r, err := z.Open(ztf.Name)
