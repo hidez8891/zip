@@ -127,7 +127,8 @@ func (u *Updater) Update(name string) (io.WriteCloser, error) {
 	u.entries[name] = new(bytes.Buffer)
 	z := NewWriter(u.entries[name])
 
-	w, err := z.CreateHeader(u.headers[name])
+	//w, err := z.CreateHeader(u.headers[name]) //TODO
+	w, err := z.Create(name)
 	if err != nil {
 		return nil, err
 	}
@@ -159,10 +160,18 @@ func (u *Updater) SaveAs(w io.Writer) error {
 
 		if entry, ok := u.entries[name]; ok {
 			// write new file
-			start := z.cw.count - offset
-			end := start + int64(fh.CompressedSize64)
+			size := int64(fh.CompressedSize64)
+			if fh.Flags&FlagDataDescriptor != 0 {
+				if fh.isZip64() {
+					size += dataDescriptor64Len
+				} else {
+					size += dataDescriptorLen
+				}
+			}
+			bodyOffset := z.cw.count - offset
+			bodyEnd := bodyOffset + size
 
-			bw := bytes.NewReader(entry.Bytes()[start:end])
+			bw := bytes.NewReader(entry.Bytes()[bodyOffset:bodyEnd])
 			if _, err := io.Copy(z.cw, bw); err != nil {
 				return err
 			}
@@ -178,11 +187,18 @@ func (u *Updater) SaveAs(w io.Writer) error {
 				return fmt.Errorf("internal error: %s is not exist", name)
 			}
 
+			size := int64(zfile.CompressedSize64)
+			if zfile.Flags&FlagDataDescriptor != 0 {
+				if fh.isZip64() {
+					size += dataDescriptor64Len
+				} else {
+					size += dataDescriptorLen
+				}
+			}
 			bodyOffset, err := zfile.findBodyOffset()
 			if err != nil {
 				return err
 			}
-			size := int64(zfile.CompressedSize64)
 			r := io.NewSectionReader(zfile.zipr, zfile.headerOffset+bodyOffset, size)
 			if _, err := io.Copy(z.cw, r); err != nil {
 				return err
