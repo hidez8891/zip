@@ -41,15 +41,15 @@ w.Write(addFileContents)
 w.Close()
 
 // update file
-w, _ := u.Update(updateFileName)
+w, _ = u.Update(updateFileName)
 w.Write(updateFileContents)
 w.Close()
 
 // rename file
-w.Rename(oldFileName, newFileName)
+u.Rename(oldFileName, newFileName)
 
 // remove file
-w.Remove(removeFileName)
+u.Remove(removeFileName)
 
 // sort
 u.Sort(func(s []string)[]string {
@@ -57,5 +57,5 @@ u.Sort(func(s []string)[]string {
 })
 
 // save
-w.SaveAs(outputWriter)
+u.SaveAs(outputWriter)
 ```
