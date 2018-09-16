@@ -260,6 +260,28 @@ func (u *Updater) SaveAs(w io.Writer) error {
 	return z.Close()
 }
 
+// Sort updates the file name list to the output of f.
+func (u *Updater) Sort(f func([]string) []string) error {
+	files := f(u.files)
+
+	if len(files) != len(u.files) {
+		return errors.New("files length are different")
+	}
+
+	exists := make(map[string]bool)
+	for _, name := range files {
+		exists[name] = true
+	}
+	for _, name := range u.files {
+		if _, ok := exists[name]; !ok {
+			return fmt.Errorf("%s is not found in new files", name)
+		}
+	}
+
+	u.files = files
+	return nil
+}
+
 // Cancel discards the changes and ends editing.
 func (u *Updater) Cancel() error {
 	u.files = make([]string, 0)

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"sort"
 	"testing"
 )
 
@@ -241,6 +242,63 @@ func TestUpdaterRemoveFile(t *testing.T) {
 	for _, zf := range updateTest.File {
 		if zf.Name != name {
 			testcase = append(testcase, zf)
+		}
+	}
+	compareContents(t, zr, testcase)
+}
+
+func TestUpdaterSortFile(t *testing.T) {
+	names := make([]string, len(updateTest.File))
+	for i, tf := range updateTest.File {
+		names[i] = tf.Name
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return names[i] > names[j] // reverse sort
+	})
+
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
+	defer file.Close()
+	defer z.Close()
+
+	// sort
+	err := z.Sort(func(s []string) []string {
+		sort.Slice(s, func(i, j int) bool {
+			return s[i] > s[j]
+		})
+		return s
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// sort error
+	if err := z.Sort(func(s []string) []string { return make([]string, 0) }); err == nil {
+		t.Fatalf("need raise error")
+	}
+	if err := z.Sort(func(s []string) []string { return make([]string, len(s)) }); err == nil {
+		t.Fatalf("need raise error")
+	}
+
+	// save
+	wdump := new(bytes.Buffer)
+	if err := z.SaveAs(wdump); err != nil {
+		t.Fatal(err)
+	}
+
+	// check file
+	zr, err := NewUpdater(bytes.NewReader(wdump.Bytes()), int64(wdump.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testcase := make([]ZipTestFile, len(names))
+	for _, zf := range updateTest.File {
+		for i, name := range names {
+			if zf.Name == name {
+				testcase[i] = zf
+				break
+			}
 		}
 	}
 	compareContents(t, zr, testcase)
