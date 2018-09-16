@@ -159,6 +159,21 @@ func TestUpdaterComment(t *testing.T) {
 	}
 }
 
+func TestUpdaterReadComment(t *testing.T) {
+	filename := "test.zip"
+	comment := "This is a zipfile comment."
+
+	// open file
+	file, z := testOpenFile(t, "testdata/"+filename)
+	defer file.Close()
+	defer z.Close()
+
+	// check
+	if z.Comment != comment {
+		t.Fatalf("zip comment=%q, want %q", z.Comment, comment)
+	}
+}
+
 func TestUpdaterRenameFile(t *testing.T) {
 	addfile := ZipTestFile{
 		Name:    "test",

@@ -57,6 +57,7 @@ func NewUpdater(r io.ReaderAt, size int64) (*Updater, error) {
 		headers: headers,
 		entries: make(map[string]*bytesEX.BufferAt),
 		r:       zr,
+		Comment: zr.Comment,
 	}, nil
 }
 
