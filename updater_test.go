@@ -34,117 +34,63 @@ var updateTest = ZipTest{
 }
 
 func TestUpdaterOnlyRead(t *testing.T) {
-	testcase := updateTest.File
-	file, err := os.Open("testdata/" + updateTest.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
 	defer file.Close()
-
-	st, _ := file.Stat()
-	z, err := NewUpdater(file, st.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer z.Close()
 
 	// check file
+	testcase := updateTest.File
 	compareContents(t, z, testcase)
 }
 
 func TestUpdaterAddFile(t *testing.T) {
-	testcase := make([]ZipTestFile, len(updateTest.File))
-	copy(testcase, updateTest.File)
-	testfile := ZipTestFile{
+	addfile := ZipTestFile{
 		Name:    "test",
 		Content: []byte("text string"),
 	}
 
-	file, err := os.Open("testdata/" + updateTest.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
 	defer file.Close()
-
-	st, _ := file.Stat()
-	z, err := NewUpdater(file, st.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer z.Close()
 
 	// add file
-	wc, err := z.Create(testfile.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	n, err := wc.Write(testfile.Content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != len(testfile.Content) {
-		t.Fatalf("write size=%d, want %d", n, len(testfile.Content))
-	}
-	if err := wc.Close(); err != nil {
-		t.Fatal(err)
-	}
+	testAddFile(t, z, addfile)
 
 	// check file
-	testcase = append(testcase, testfile)
+	testcase := make([]ZipTestFile, len(updateTest.File))
+	copy(testcase, updateTest.File)
+	testcase = append(testcase, addfile)
 	compareContents(t, z, testcase)
 }
 
 func TestUpdaterUpdateFile(t *testing.T) {
-	testcase := make([]ZipTestFile, len(updateTest.File))
-	copy(testcase, updateTest.File)
-	testfile := ZipTestFile{
+	updatefile := ZipTestFile{
 		Name:    "dir/bar",
 		Content: []byte("update string"),
 	}
 
-	file, err := os.Open("testdata/" + updateTest.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
 	defer file.Close()
-
-	st, _ := file.Stat()
-	z, err := NewUpdater(file, st.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer z.Close()
 
 	// update file
-	wc, err := z.Update(testfile.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	n, err := wc.Write(testfile.Content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != len(testfile.Content) {
-		t.Fatalf("write size=%d, want %d", n, len(testfile.Content))
-	}
-	if err := wc.Close(); err != nil {
-		t.Fatal(err)
-	}
+	testUpdateFile(t, z, updatefile)
 
 	// check file
+	testcase := make([]ZipTestFile, len(updateTest.File))
+	copy(testcase, updateTest.File)
 	for i := range testcase {
-		if testcase[i].Name == testfile.Name {
-			testcase[i] = testfile
+		if testcase[i].Name == updatefile.Name {
+			testcase[i] = updatefile
 		}
 	}
 	compareContents(t, z, testcase)
 }
 
 func TestUpdaterSaveAsFile(t *testing.T) {
-	testcase := make([]ZipTestFile, len(updateTest.File))
-	copy(testcase, updateTest.File)
 	updatefile := ZipTestFile{
 		Name:    "dir/bar",
 		Content: []byte("update string"),
@@ -154,42 +100,14 @@ func TestUpdaterSaveAsFile(t *testing.T) {
 		Content: []byte("text string"),
 	}
 
-	file, err := os.Open("testdata/" + updateTest.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
 	defer file.Close()
-
-	st, _ := file.Stat()
-	z, err := NewUpdater(file, st.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer z.Close()
 
-	// add file
-	wc, err := z.Create(addfile.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wc.Write(addfile.Content); err != nil {
-		t.Fatal(err)
-	}
-	if err := wc.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	// update file
-	wc, err = z.Update(updatefile.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wc.Write(updatefile.Content); err != nil {
-		t.Fatal(err)
-	}
-	if err := wc.Close(); err != nil {
-		t.Fatal(err)
-	}
+	// add & update file
+	testAddFile(t, z, addfile)
+	testUpdateFile(t, z, updatefile)
 
 	// save
 	wdump := new(bytes.Buffer)
@@ -202,6 +120,9 @@ func TestUpdaterSaveAsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	testcase := make([]ZipTestFile, len(updateTest.File))
+	copy(testcase, updateTest.File)
 	for i := range testcase {
 		if testcase[i].Name == updatefile.Name {
 			testcase[i] = updatefile
@@ -212,17 +133,9 @@ func TestUpdaterSaveAsFile(t *testing.T) {
 }
 
 func TestUpdaterComment(t *testing.T) {
-	file, err := os.Open("testdata/" + updateTest.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
 	defer file.Close()
-
-	st, _ := file.Stat()
-	z, err := NewUpdater(file, st.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer z.Close()
 
 	// update comment
@@ -246,55 +159,21 @@ func TestUpdaterComment(t *testing.T) {
 }
 
 func TestUpdaterRenameFile(t *testing.T) {
-	testcase := make([]ZipTestFile, len(updateTest.File))
-	copy(testcase, updateTest.File)
 	addfile := ZipTestFile{
 		Name:    "test",
 		Content: []byte("text string"),
 	}
 
-	oldname1 := "dir/bar"
-	newname1 := "dir/abcd"
-	for i, zf := range testcase {
-		if zf.Name == oldname1 {
-			testcase[i] = ZipTestFile{
-				Name:    newname1,
-				Content: zf.Content,
-			}
-		}
-	}
+	oldname1, newname1 := "dir/bar", "dir/abcd"
+	oldname2, newname2 := "test", "testing"
 
-	oldname2 := "test"
-	newname2 := "testing"
-	testcase = append(testcase, ZipTestFile{
-		Name:    newname2,
-		Content: addfile.Content,
-	})
-
-	file, err := os.Open("testdata/" + updateTest.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
 	defer file.Close()
-
-	st, _ := file.Stat()
-	z, err := NewUpdater(file, st.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer z.Close()
 
 	// add file
-	wc, err := z.Create(addfile.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wc.Write(addfile.Content); err != nil {
-		t.Fatal(err)
-	}
-	if err := wc.Close(); err != nil {
-		t.Fatal(err)
-	}
+	testAddFile(t, z, addfile)
 
 	// rename file
 	if err := z.Rename(oldname1, newname1); err != nil {
@@ -315,30 +194,30 @@ func TestUpdaterRenameFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	testcase := make([]ZipTestFile, len(updateTest.File))
+	copy(testcase, updateTest.File)
+	for i, zf := range testcase {
+		if zf.Name == oldname1 {
+			testcase[i] = ZipTestFile{
+				Name:    newname1,
+				Content: zf.Content,
+			}
+		}
+	}
+	testcase = append(testcase, ZipTestFile{
+		Name:    newname2,
+		Content: addfile.Content,
+	})
 	compareContents(t, zr, testcase)
 }
 
 func TestUpdaterRemoveFile(t *testing.T) {
-	testcase := make([]ZipTestFile, 0)
-
 	name := "dir/bar"
-	for _, zf := range updateTest.File {
-		if zf.Name != name {
-			testcase = append(testcase, zf)
-		}
-	}
 
-	file, err := os.Open("testdata/" + updateTest.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// open file
+	file, z := testOpenFile(t, "testdata/"+updateTest.Name)
 	defer file.Close()
-
-	st, _ := file.Stat()
-	z, err := NewUpdater(file, st.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer z.Close()
 
 	// remove file
@@ -357,7 +236,62 @@ func TestUpdaterRemoveFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	testcase := make([]ZipTestFile, 0)
+	for _, zf := range updateTest.File {
+		if zf.Name != name {
+			testcase = append(testcase, zf)
+		}
+	}
 	compareContents(t, zr, testcase)
+}
+
+func testOpenFile(t *testing.T, src string) (*os.File, *Updater) {
+	t.Helper()
+
+	file, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	st, _ := file.Stat()
+	z, err := NewUpdater(file, st.Size())
+	if err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+
+	return file, z
+}
+
+func testAddFile(t *testing.T, z *Updater, addfile ZipTestFile) {
+	t.Helper()
+
+	wc, err := z.Create(addfile.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wc.Write(addfile.Content); err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testUpdateFile(t *testing.T, z *Updater, updatefile ZipTestFile) {
+	t.Helper()
+
+	wc, err := z.Update(updatefile.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wc.Write(updatefile.Content); err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func compareContents(t *testing.T, z *Updater, testcase []ZipTestFile) {
