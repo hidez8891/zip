@@ -13,12 +13,6 @@ import (
 	bytesEX "github.com/hidez8891/zip/internal/bytes"
 )
 
-// WriteWriterAt is the interface that groups the basic Write and WriteAt methods.
-type WriteWriterAt interface {
-	io.Writer
-	io.WriterAt
-}
-
 // A WriteCloser implements the io.WriteCloser
 type WriteCloser struct {
 	writer io.Writer
