@@ -5,7 +5,7 @@
 /*
 Package zip provides support for reading and writing ZIP archives.
 
-See: https://www.pkware.com/documents/casestudies/APPNOTE.TXT
+See: https://www.pkware.com/appnote
 
 This package does not support disk spanning.
 
@@ -23,16 +23,12 @@ import (
 	"os"
 	"path"
 	"time"
-
-	"github.com/hidez8891/encstr"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/charmap"
 )
 
 // Compression methods.
 const (
-	Store   uint16 = 0
-	Deflate uint16 = 8
+	Store   uint16 = 0 // no compression
+	Deflate uint16 = 8 // DEFLATE compressed
 )
 
 const (
@@ -50,57 +46,95 @@ const (
 	directory64LocLen        = 20         //
 	directory64EndLen        = 56         // + extra
 
-	// Constants for the first byte in CreatorVersion
+	// Constants for the first byte in CreatorVersion.
 	creatorFAT    = 0
 	creatorUnix   = 3
 	creatorNTFS   = 11
 	creatorVFAT   = 14
 	creatorMacOSX = 19
 
-	// version numbers
+	// Version numbers.
 	zipVersion20 = 20 // 2.0
 	zipVersion45 = 45 // 4.5 (reads and writes zip64 archives)
 
-	// limits for non zip64 files
+	// Limits for non zip64 files.
 	uint16max = (1 << 16) - 1
 	uint32max = (1 << 32) - 1
 
-	// extra header id's
-	zip64ExtraId = 0x0001 // zip64 Extended Information Extra Field
-
-	// flags
-	useDataDescriptor = 0x08   // use data descriptor
-	useUTF8           = 0x0800 // filename & comment is UTF-8
+	// Extra header IDs.
+	//
+	// IDs 0..31 are reserved for official use by PKWARE.
+	// IDs above that range are defined by third-party vendors.
+	// Since ZIP lacked high precision timestamps (nor a official specification
+	// of the timezone used for the date fields), many competing extra fields
+	// have been invented. Pervasive use effectively makes them "official".
+	//
+	// See http://mdfs.net/Docs/Comp/Archiving/Zip/ExtraField
+	zip64ExtraID       = 0x0001 // Zip64 extended information
+	ntfsExtraID        = 0x000a // NTFS
+	unixExtraID        = 0x000d // UNIX
+	extTimeExtraID     = 0x5455 // Extended timestamp
+	infoZipUnixExtraID = 0x5855 // Info-ZIP Unix extension
 )
-
-// LocalEncoding is default local encoding
-var LocalEncoding encoding.Encoding = charmap.CodePage437
 
 // FileHeader describes a file within a zip file.
 // See the zip spec for details.
 type FileHeader struct {
 	// Name is the name of the file.
-	// It must be a relative path: it must not start with a drive
-	// letter (e.g. C:) or leading slash, and only forward slashes
-	// are allowed.
-	Name *encstr.String
+	//
+	// It must be a relative path, not start with a drive letter (such as "C:"),
+	// and must use forward slashes instead of back slashes. A trailing slash
+	// indicates that this file is a directory and should have no data.
+	//
+	// When reading zip files, the Name field is populated from
+	// the zip file directly and is not validated for correctness.
+	// It is the caller's responsibility to sanitize it as
+	// appropriate, including canonicalizing slash directions,
+	// validating that paths are relative, and preventing path
+	// traversal through filenames ("../../../").
+	Name string
 
-	CreatorVersion     uint16
-	ReaderVersion      uint16
-	Flags              uint16
-	Method             uint16
-	ModifiedTime       uint16 // MS-DOS time
-	ModifiedDate       uint16 // MS-DOS date
+	// Comment is any arbitrary user-defined string shorter than 64KiB.
+	Comment string
+
+	// NonUTF8 indicates that Name and Comment are not encoded in UTF-8.
+	//
+	// By specification, the only other encoding permitted should be CP-437,
+	// but historically many ZIP readers interpret Name and Comment as whatever
+	// the system's local character encoding happens to be.
+	//
+	// This flag should only be set if the user intends to encode a non-portable
+	// ZIP file for a specific localized region. Otherwise, the Writer
+	// automatically sets the ZIP format's UTF-8 flag for valid UTF-8 strings.
+	NonUTF8 bool
+
+	CreatorVersion uint16
+	ReaderVersion  uint16
+	Flags          uint16
+
+	// Method is the compression method. If zero, Store is used.
+	Method uint16
+
+	// Modified is the modified time of the file.
+	//
+	// When reading, an extended timestamp is preferred over the legacy MS-DOS
+	// date field, and the offset between the times is used as the timezone.
+	// If only the MS-DOS date is present, the timezone is assumed to be UTC.
+	//
+	// When writing, an extended timestamp (which is timezone-agnostic) is
+	// always emitted. The legacy MS-DOS date field is encoded according to the
+	// location of the Modified time.
+	Modified     time.Time
+	ModifiedTime uint16 // Deprecated: Legacy MS-DOS date; use Modified instead.
+	ModifiedDate uint16 // Deprecated: Legacy MS-DOS time; use Modified instead.
+
 	CRC32              uint32
 	CompressedSize     uint32 // Deprecated: Use CompressedSize64 instead.
 	UncompressedSize   uint32 // Deprecated: Use UncompressedSize64 instead.
 	CompressedSize64   uint64
 	UncompressedSize64 uint64
 	Extra              []byte
-	FileExtra          []byte
-	InternalAttrs      uint32
 	ExternalAttrs      uint32 // Meaning depends on CreatorVersion
-	Comment            *encstr.String
 }
 
 // FileInfo returns an os.FileInfo for the FileHeader.
@@ -113,7 +147,7 @@ type headerFileInfo struct {
 	fh *FileHeader
 }
 
-func (fi headerFileInfo) Name() string { return path.Base(fi.fh.Name.Str()) }
+func (fi headerFileInfo) Name() string { return path.Base(fi.fh.Name) }
 func (fi headerFileInfo) Size() int64 {
 	if fi.fh.UncompressedSize64 > 0 {
 		return int64(fi.fh.UncompressedSize64)
@@ -130,14 +164,14 @@ func (fi headerFileInfo) Sys() interface{}   { return fi.fh }
 // Because os.FileInfo's Name method returns only the base name of
 // the file it describes, it may be necessary to modify the Name field
 // of the returned header to provide the full path name of the file.
+// If compression is desired, callers should set the FileHeader.Method
+// field; it is unset by default.
 func FileInfoHeader(fi os.FileInfo) (*FileHeader, error) {
 	size := fi.Size()
 	fh := &FileHeader{
-		Name:               encstr.NewString(fi.Name()),
-		Comment:            encstr.NewString2([]byte{}, LocalEncoding),
+		Name:               fi.Name(),
 		UncompressedSize64: uint64(size),
 	}
-	fh.Name.Convert(LocalEncoding)
 	fh.SetModTime(fi.ModTime())
 	fh.SetMode(fi.Mode())
 	if fh.UncompressedSize64 > uint32max {
@@ -156,12 +190,27 @@ type directoryEnd struct {
 	directorySize      uint64
 	directoryOffset    uint64 // relative to file
 	commentLen         uint16
-	comment            *encstr.String
+	comment            string
+}
+
+// timeZone returns a *time.Location based on the provided offset.
+// If the offset is non-sensible, then this uses an offset of zero.
+func timeZone(offset time.Duration) *time.Location {
+	const (
+		minOffset   = -12 * time.Hour  // E.g., Baker island at -12:00
+		maxOffset   = +14 * time.Hour  // E.g., Line island at +14:00
+		offsetAlias = 15 * time.Minute // E.g., Nepal at +5:45
+	)
+	offset = offset.Round(offsetAlias)
+	if offset < minOffset || maxOffset < offset {
+		offset = 0
+	}
+	return time.FixedZone("", int(offset/time.Second))
 }
 
 // msDosTimeToTime converts an MS-DOS date and time into a time.Time.
 // The resolution is 2s.
-// See: http://msdn.microsoft.com/en-us/library/ms724247(v=VS.85).aspx
+// See: https://msdn.microsoft.com/en-us/library/ms724247(v=VS.85).aspx
 func msDosTimeToTime(dosDate, dosTime uint16) time.Time {
 	return time.Date(
 		// date bits 0-4: day of month; 5-8: month; 9-15: years since 1980
@@ -175,29 +224,34 @@ func msDosTimeToTime(dosDate, dosTime uint16) time.Time {
 		int(dosTime&0x1f*2),
 		0, // nanoseconds
 
-		time.Local,
+		time.UTC,
 	)
 }
 
 // timeToMsDosTime converts a time.Time to an MS-DOS date and time.
 // The resolution is 2s.
-// See: http://msdn.microsoft.com/en-us/library/ms724274(v=VS.85).aspx
+// See: https://msdn.microsoft.com/en-us/library/ms724274(v=VS.85).aspx
 func timeToMsDosTime(t time.Time) (fDate uint16, fTime uint16) {
-	t = t.In(time.Local)
 	fDate = uint16(t.Day() + int(t.Month())<<5 + (t.Year()-1980)<<9)
 	fTime = uint16(t.Second()/2 + t.Minute()<<5 + t.Hour()<<11)
 	return
 }
 
-// ModTime returns the modification time in Local Time Zone.
-// The resolution is 2s.
+// ModTime returns the modification time in UTC using the legacy
+// ModifiedDate and ModifiedTime fields.
+//
+// Deprecated: Use Modified instead.
 func (h *FileHeader) ModTime() time.Time {
 	return msDosTimeToTime(h.ModifiedDate, h.ModifiedTime)
 }
 
-// SetModTime sets the ModifiedTime and ModifiedDate fields to the given time in Local Time Zone.
-// The resolution is 2s.
+// SetModTime sets the Modified, ModifiedTime, and ModifiedDate fields
+// to the given time in UTC.
+//
+// Deprecated: Use Modified instead.
 func (h *FileHeader) SetModTime(t time.Time) {
+	t = t.UTC() // Convert to UTC for compatibility
+	h.Modified = t
 	h.ModifiedDate, h.ModifiedTime = timeToMsDosTime(t)
 }
 
@@ -228,9 +282,7 @@ func (h *FileHeader) Mode() (mode os.FileMode) {
 	case creatorNTFS, creatorVFAT, creatorFAT:
 		mode = msdosModeToFileMode(h.ExternalAttrs)
 	}
-
-	name := h.Name.Str()
-	if len(name) > 0 && name[len(name)-1] == '/' {
+	if len(h.Name) > 0 && h.Name[len(h.Name)-1] == '/' {
 		mode |= os.ModeDir
 	}
 	return mode
@@ -253,11 +305,6 @@ func (h *FileHeader) SetMode(mode os.FileMode) {
 // isZip64 reports whether the file size exceeds the 32 bit limit
 func (fh *FileHeader) isZip64() bool {
 	return fh.CompressedSize64 >= uint32max || fh.UncompressedSize64 >= uint32max
-}
-
-// hasDataDescriptor reports the file has data descriptor block
-func (fh *FileHeader) hasDataDescriptor() bool {
-	return fh.Flags&0x08 != 0
 }
 
 func msdosModeToFileMode(m uint32) (mode os.FileMode) {

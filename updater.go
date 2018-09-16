@@ -1,241 +1,292 @@
-// Copyright 2016 hidez8891. All rights reserved.
+// Copyright 2018 hidez8891. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package zip
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"os"
 
-	"github.com/hidez8891/encstr"
+	bytesEX "github.com/hidez8891/zip/internal/bytes"
 )
 
-type editorFileHeader struct {
-	*FileHeader
-	isNewFile bool
+// A WriteCloser implements the io.WriteCloser
+type WriteCloser struct {
+	writer io.Writer
+	closer io.Closer
 }
 
-// Updater implements a zip file edit-writer.
+// Write implements the io.WriteCloser interface.
+func (w *WriteCloser) Write(p []byte) (int, error) {
+	return w.writer.Write(p)
+}
+
+// Close implements the io.WriteCloser interface.
+func (w *WriteCloser) Close() error {
+	return w.closer.Close()
+}
+
+// Updater provides editing of zip files.
 type Updater struct {
-	path    string
-	r       *ReadCloser
-	w       *Writer
-	tmpw    *os.File
-	File    []*editorFileHeader
-	Comment *encstr.String
+	files   []string
+	headers map[string]*FileHeader
+	entries map[string]*bytesEX.BufferAt
+	r       *Reader
+	Comment string
 }
 
-// OpenUpdater exist zip file for editing.
-func OpenUpdater(path string) (*Updater, error) {
-	r, err := OpenReader(path)
+// NewUpdater returns a new Updater from r and size.
+func NewUpdater(r io.ReaderAt, size int64) (*Updater, error) {
+	zr, err := NewReader(r, size)
 	if err != nil {
 		return nil, err
 	}
 
-	u := &Updater{
-		path:    path,
-		r:       r,
-		Comment: r.Comment,
+	files := make([]string, len(zr.File))
+	headers := make(map[string]*FileHeader, len(zr.File))
+	for i, zf := range zr.File {
+		files[i] = zf.Name
+		headers[zf.Name] = &zf.FileHeader
 	}
 
-	u.File = make([]*editorFileHeader, 0)
-	for _, file := range r.File {
-		u.File = append(u.File, &editorFileHeader{
-			FileHeader: &file.FileHeader,
-			isNewFile:  false,
-		})
-	}
-
-	return u, nil
+	return &Updater{
+		files:   files,
+		headers: headers,
+		entries: make(map[string]*bytesEX.BufferAt),
+		r:       zr,
+		Comment: zr.Comment,
+	}, nil
 }
 
-// AppendFile add a file to the zip archive at last.
-func (u *Updater) AppendFile(name string, streamMode bool) (io.Writer, error) {
-	writer, err := u.createWriter(name, streamMode)
-	if err != nil {
-		return nil, err
+// Files returns a FileHeader list.
+func (u *Updater) Files() []*FileHeader {
+	files := make([]*FileHeader, len(u.files))
+	for i, name := range u.files {
+		files[i] = u.headers[name]
 	}
-
-	u.File = append(u.File, &editorFileHeader{
-		FileHeader: u.w.dir[len(u.w.dir)-1].FileHeader,
-		isNewFile:  true,
-	})
-
-	return writer, nil
+	return files
 }
 
-// InsertFile add a file to the zip archive at pos-th.
-func (u *Updater) InsertFile(pos int, name string, streamMode bool) (io.Writer, error) {
-	if len(u.File) >= pos {
-		return nil, fmt.Errorf("zip: []File index out of range")
+// Open returns a ReadCloser that provides access to the File's contents.
+func (u *Updater) Open(name string) (io.ReadCloser, error) {
+	if _, ok := u.headers[name]; !ok {
+		return nil, errors.New("File not found")
 	}
 
-	writer, err := u.createWriter(name, streamMode)
-	if err != nil {
-		return nil, err
-	}
-
-	u.File = append(u.File, nil)
-	copy(u.File[pos+1:], u.File[pos:])
-	u.File[pos] = &editorFileHeader{
-		FileHeader: u.w.dir[len(u.w.dir)-1].FileHeader,
-		isNewFile:  true,
-	}
-
-	return writer, nil
-}
-
-func (u *Updater) createWriter(name string, streamMode bool) (io.Writer, error) {
-	if u.w == nil {
-		var err error
-		if u.tmpw, err = ioutil.TempFile("", "tmp_zip_updater"); err != nil {
+	if buf, ok := u.entries[name]; ok {
+		b := buf.Bytes()
+		z, err := NewReader(bytes.NewReader(b), int64(len(b)))
+		if err != nil {
 			return nil, err
 		}
-		u.w = NewWriter(u.tmpw)
+		return z.File[0].Open()
 	}
 
-	writer, err := u.w.Create(name, streamMode)
+	for _, zf := range u.r.File {
+		if zf.Name == name {
+			return zf.Open()
+		}
+	}
+	return nil, errors.New("internal error: name not found")
+}
+
+// Create returns a Writer to which the file contents should be written.
+func (u *Updater) Create(name string) (io.WriteCloser, error) {
+	if _, ok := u.headers[name]; ok {
+		return nil, errors.New("invalid duplicate file name")
+	}
+
+	u.entries[name] = new(bytesEX.BufferAt)
+	z := NewWriter(u.entries[name])
+
+	w, err := z.Create(name)
 	if err != nil {
 		return nil, err
 	}
+	u.files = append(u.files, name)
+	u.headers[name] = z.dir[0].FileHeader
 
-	return writer, nil
+	wc := &WriteCloser{
+		writer: w,
+		closer: z,
+	}
+	return wc, nil
 }
 
-// SaveAs write all changes to new zip file and close file.
-func (u *Updater) SaveAs(newpath string) error {
-	newfile, err := os.Create(newpath)
+// Update returns a Writer to which the file contents should be overwritten.
+func (u *Updater) Update(name string) (io.WriteCloser, error) {
+	if _, ok := u.headers[name]; !ok {
+		return nil, errors.New("not found file name")
+	}
+	useDataDescriptor := u.headers[name].Flags&FlagDataDescriptor != 0
+
+	u.entries[name] = new(bytesEX.BufferAt)
+	z := NewWriter(u.entries[name])
+
+	w, err := z.CreateHeader(u.headers[name])
 	if err != nil {
+		return nil, err
+	}
+	if !useDataDescriptor {
+		z.dir[0].FileHeader.Flags &^= FlagDataDescriptor
+	}
+	u.headers[name] = z.dir[0].FileHeader
+
+	wc := &WriteCloser{
+		writer: w,
+		closer: z,
+	}
+	return wc, nil
+}
+
+// Rename changes the file name.
+func (u *Updater) Rename(oldName, newName string) error {
+	if _, ok := u.headers[newName]; ok {
+		return errors.New("new file name already exists")
+	}
+
+	header, ok := u.headers[oldName]
+	if !ok {
+		return errors.New("not found file name")
+	}
+	header.Name = newName
+	u.headers[newName] = header
+	delete(u.headers, oldName)
+
+	for i, v := range u.files {
+		if v == oldName {
+			u.files[i] = newName
+		}
+	}
+
+	if entry, ok := u.entries[oldName]; ok {
+		u.entries[newName] = entry
+		delete(u.entries, oldName)
+	}
+	return nil
+}
+
+// Remove deletes the file.
+func (u *Updater) Remove(name string) error {
+	if _, ok := u.headers[name]; !ok {
+		return errors.New("not found file name")
+	}
+	delete(u.headers, name)
+
+	newfiles := make([]string, 0)
+	for _, v := range u.files {
+		if v != name {
+			newfiles = append(newfiles, v)
+		}
+	}
+	u.files = newfiles
+
+	if _, ok := u.entries[name]; ok {
+		delete(u.entries, name)
+	}
+	return nil
+}
+
+// SaveAs saves the changes to w.
+// If data descriptor is not used, w must implement io.WriterAt.
+func (u *Updater) SaveAs(w io.Writer) error {
+	z := NewWriter(w)
+
+	if err := z.SetComment(u.Comment); err != nil {
 		return err
 	}
 
-	defer func() {
-		if newfile != nil {
-			newfile.Close()
-			os.Remove(newpath)
-		}
-	}()
+	for _, name := range u.files {
+		offset := z.cw.count
 
-	// reopen temporary file
-	var tmpreader *Reader
-	if u.w != nil {
-		var err error
-		if err = u.w.Close(); err != nil {
+		fh := u.headers[name]
+		if err := writeHeader(z.cw, fh); err != nil {
 			return err
 		}
-		u.w = nil
+		z.dir = append(z.dir, &header{
+			FileHeader: fh,
+			offset:     uint64(offset),
+		})
 
-		state, err := u.tmpw.Stat()
-		if err != nil {
-			return err
-		}
-
-		if _, err = u.tmpw.Seek(0, os.SEEK_SET); err != nil {
-			return err
-		}
-
-		tmpreader, err = NewReader(u.tmpw, state.Size())
-		if err != nil {
-			return err
-		}
-	}
-
-	// copy & write
-	w := NewWriter(newfile)
-	w.Comment = u.Comment
-	for _, header := range u.File {
-		var (
-			file *File
-			zipr *Reader
-		)
-
-		if header.isNewFile {
-			zipr = tmpreader
+		var zfile *File
+		if entry, ok := u.entries[name]; ok {
+			// write new file
+			zr, err := NewReader(bytes.NewReader(entry.Bytes()), int64(entry.Len()))
+			if err != nil {
+				return err
+			}
+			if len(zr.File) == 0 {
+				return fmt.Errorf("internal error: %s is not exist", name)
+			}
+			zfile = zr.File[0]
 		} else {
-			zipr = &u.r.Reader
-		}
-
-		if zipr == nil {
-			return fmt.Errorf("zip: zip reader has null pointer")
-		}
-
-		for _, f := range zipr.File {
-			if f.Name.Str() == header.Name.Str() {
-				file = f
-				break
+			// write zip's content
+			for _, zf := range u.r.File {
+				if zf.Name == name {
+					zfile = zf
+				}
+			}
+			if zfile == nil {
+				return fmt.Errorf("internal error: %s is not exist", name)
 			}
 		}
 
-		if file == nil {
-			return fmt.Errorf("zip: file %s does not exist", header.Name.Str())
+		size := int64(zfile.CompressedSize64)
+		if zfile.Flags&FlagDataDescriptor != 0 {
+			if fh.isZip64() {
+				size += dataDescriptor64Len
+			} else {
+				size += dataDescriptorLen
+			}
 		}
-
-		if err := w.addFile(file); err != nil {
+		bodyOffset, err := zfile.findBodyOffset()
+		if err != nil {
+			return err
+		}
+		r := io.NewSectionReader(zfile.zipr, zfile.headerOffset+bodyOffset, size)
+		if _, err := io.Copy(z.cw, r); err != nil {
 			return err
 		}
 	}
-	if err := w.Close(); err != nil {
-		return err
+
+	return z.Close()
+}
+
+// Sort updates the file name list to the output of f.
+func (u *Updater) Sort(f func([]string) []string) error {
+	files := f(u.files)
+
+	if len(files) != len(u.files) {
+		return errors.New("files length are different")
 	}
 
-	// close file
-	if err := newfile.Close(); err != nil {
-		return err
+	exists := make(map[string]bool)
+	for _, name := range files {
+		exists[name] = true
 	}
-	newfile = nil
+	for _, name := range u.files {
+		if _, ok := exists[name]; !ok {
+			return fmt.Errorf("%s is not found in new files", name)
+		}
+	}
 
-	if err := u.r.Close(); err != nil {
-		return err
-	}
+	u.files = files
+	return nil
+}
+
+// Cancel discards the changes and ends editing.
+func (u *Updater) Cancel() error {
+	u.files = make([]string, 0)
+	u.headers = make(map[string]*FileHeader, 0)
+	u.entries = make(map[string]*bytesEX.BufferAt, 0)
 	u.r = nil
-
-	if u.tmpw != nil {
-		if err := u.tmpw.Close(); err != nil {
-			return err
-		}
-		if err := os.Remove(u.tmpw.Name()); err != nil {
-			return err
-		}
-		u.tmpw = nil
-	}
-
 	return nil
 }
 
-// Save write all changes to current zip file and close file.
-func (u *Updater) Save() error {
-	tmpfile, err := ioutil.TempFile("", u.r.f.Name())
-	if err != nil {
-		return err
-	}
-	tmpfile.Close()
-	tmpname := tmpfile.Name()
-
-	// copy & write & close file
-	if err := u.SaveAs(tmpname); err != nil {
-		return err
-	}
-
-	// move & overwrite
-	backuppath := u.path + ".bak"
-	if err := os.Rename(u.path, backuppath); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpname, u.path); err != nil {
-		return err
-	}
-	os.Remove(backuppath)
-
-	return nil
-}
-
-// Close discard all changes and close file.
+// Close discards the changes and ends editing.
 func (u *Updater) Close() error {
-	if u.r != nil {
-		return u.r.Close()
-	}
-	return nil
+	return u.Cancel()
 }

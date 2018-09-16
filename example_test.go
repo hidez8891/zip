@@ -5,14 +5,13 @@
 package zip_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/flate"
 	"fmt"
 	"io"
 	"log"
 	"os"
-
-	"github.com/hidez8891/zip"
 )
 
 func ExampleWriter() {
@@ -31,8 +30,7 @@ func ExampleWriter() {
 		{"todo.txt", "Get animal handling licence.\nWrite more examples."},
 	}
 	for _, file := range files {
-		streamMode := true
-		f, err := w.Create(file.Name, streamMode)
+		f, err := w.Create(file.Name)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -60,7 +58,7 @@ func ExampleReader() {
 	// Iterate through the files in the archive,
 	// printing some of their contents.
 	for _, f := range r.File {
-		fmt.Printf("Contents of %s:\n", f.Name.Str())
+		fmt.Printf("Contents of %s:\n", f.Name)
 		rc, err := f.Open()
 		if err != nil {
 			log.Fatal(err)
