@@ -147,6 +147,54 @@ func (u *Updater) Update(name string) (io.WriteCloser, error) {
 	return wc, nil
 }
 
+// Rename changes the file name.
+func (u *Updater) Rename(oldName, newName string) error {
+	if _, ok := u.headers[newName]; ok {
+		return errors.New("new file name already exists")
+	}
+
+	header, ok := u.headers[oldName]
+	if !ok {
+		return errors.New("not found file name")
+	}
+	header.Name = newName
+	u.headers[newName] = header
+	delete(u.headers, oldName)
+
+	for i, v := range u.files {
+		if v == oldName {
+			u.files[i] = newName
+		}
+	}
+
+	if entry, ok := u.entries[oldName]; ok {
+		u.entries[newName] = entry
+		delete(u.entries, oldName)
+	}
+	return nil
+}
+
+// Remove deletes the file.
+func (u *Updater) Remove(name string) error {
+	if _, ok := u.headers[name]; !ok {
+		return errors.New("not found file name")
+	}
+	delete(u.headers, name)
+
+	newfiles := make([]string, 0)
+	for _, v := range u.files {
+		if v != name {
+			newfiles = append(newfiles, v)
+		}
+	}
+	u.files = newfiles
+
+	if _, ok := u.entries[name]; ok {
+		delete(u.entries, name)
+	}
+	return nil
+}
+
 // SaveAs saves the changes to w.
 // If data descriptor is not used, w must implement io.WriterAt.
 func (u *Updater) SaveAs(w io.Writer) error {
@@ -168,26 +216,19 @@ func (u *Updater) SaveAs(w io.Writer) error {
 			offset:     uint64(offset),
 		})
 
+		var zfile *File
 		if entry, ok := u.entries[name]; ok {
 			// write new file
-			size := int64(fh.CompressedSize64)
-			if fh.Flags&FlagDataDescriptor != 0 {
-				if fh.isZip64() {
-					size += dataDescriptor64Len
-				} else {
-					size += dataDescriptorLen
-				}
-			}
-			bodyOffset := z.cw.count - offset
-			bodyEnd := bodyOffset + size
-
-			bw := bytes.NewReader(entry.Bytes()[bodyOffset:bodyEnd])
-			if _, err := io.Copy(z.cw, bw); err != nil {
+			zr, err := NewReader(bytes.NewReader(entry.Bytes()), int64(entry.Len()))
+			if err != nil {
 				return err
 			}
+			if len(zr.File) == 0 {
+				return fmt.Errorf("internal error: %s is not exist", name)
+			}
+			zfile = zr.File[0]
 		} else {
 			// write zip's content
-			var zfile *File
 			for _, zf := range u.r.File {
 				if zf.Name == name {
 					zfile = zf
@@ -196,23 +237,23 @@ func (u *Updater) SaveAs(w io.Writer) error {
 			if zfile == nil {
 				return fmt.Errorf("internal error: %s is not exist", name)
 			}
+		}
 
-			size := int64(zfile.CompressedSize64)
-			if zfile.Flags&FlagDataDescriptor != 0 {
-				if fh.isZip64() {
-					size += dataDescriptor64Len
-				} else {
-					size += dataDescriptorLen
-				}
+		size := int64(zfile.CompressedSize64)
+		if zfile.Flags&FlagDataDescriptor != 0 {
+			if fh.isZip64() {
+				size += dataDescriptor64Len
+			} else {
+				size += dataDescriptorLen
 			}
-			bodyOffset, err := zfile.findBodyOffset()
-			if err != nil {
-				return err
-			}
-			r := io.NewSectionReader(zfile.zipr, zfile.headerOffset+bodyOffset, size)
-			if _, err := io.Copy(z.cw, r); err != nil {
-				return err
-			}
+		}
+		bodyOffset, err := zfile.findBodyOffset()
+		if err != nil {
+			return err
+		}
+		r := io.NewSectionReader(zfile.zipr, zfile.headerOffset+bodyOffset, size)
+		if _, err := io.Copy(z.cw, r); err != nil {
+			return err
 		}
 	}
 
