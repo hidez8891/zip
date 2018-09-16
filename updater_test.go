@@ -211,6 +211,40 @@ func TestUpdaterSaveAsFile(t *testing.T) {
 	compareContents(t, zr, testcase)
 }
 
+func TestUpdaterComment(t *testing.T) {
+	file, err := os.Open("testdata/" + updateTest.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	st, _ := file.Stat()
+	z, err := NewUpdater(file, st.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer z.Close()
+
+	// update comment
+	expected := "new updater comment"
+	z.Comment = expected
+
+	// save
+	wdump := new(bytes.Buffer)
+	if err := z.SaveAs(wdump); err != nil {
+		t.Fatal(err)
+	}
+
+	// check
+	zr, err := NewReader(bytes.NewReader(wdump.Bytes()), int64(wdump.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zr.Comment != expected {
+		t.Fatalf("zip comment=%q, want %q", zr.Comment, expected)
+	}
+}
+
 func compareContents(t *testing.T, z *Updater, testcase []ZipTestFile) {
 	t.Helper()
 

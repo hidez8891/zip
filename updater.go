@@ -41,6 +41,7 @@ type Updater struct {
 	headers map[string]*FileHeader
 	entries map[string]*bytesEX.BufferAt
 	r       *Reader
+	Comment string
 }
 
 // NewUpdater returns a new Updater from r and size.
@@ -150,6 +151,10 @@ func (u *Updater) Update(name string) (io.WriteCloser, error) {
 // If data descriptor is not used, w must implement io.WriterAt.
 func (u *Updater) SaveAs(w io.Writer) error {
 	z := NewWriter(w)
+
+	if err := z.SetComment(u.Comment); err != nil {
+		return err
+	}
 
 	for _, name := range u.files {
 		offset := z.cw.count
