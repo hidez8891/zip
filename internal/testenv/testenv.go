@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"errors"
 	"flag"
-	"internal/cfg"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +23,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"zip/internal/cfg"
 )
 
 // Builder reports the name of the builder running this test

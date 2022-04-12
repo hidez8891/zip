@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"internal/obscuretestdata"
 	"io"
 	"io/fs"
 	"os"
@@ -19,6 +18,8 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"zip/internal/obscuretestdata"
 )
 
 type ZipTest struct {

@@ -11,13 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"internal/testenv"
 	"io"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"zip/internal/testenv"
 )
 
 func TestOver65kFiles(t *testing.T) {
