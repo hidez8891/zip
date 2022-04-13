@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -63,33 +64,30 @@ func updateTestZip(t *testing.T, zt UpdaterTest) {
 	}
 
 	for _, ft := range zt.File {
-		updateReadTestFile(t, zu, ft, zt.Name)
+		updateReadTestFile(t, zu, ft)
 	}
 }
 
-func updateReadTestFile(t *testing.T, zu *Updater, ft ZipTestFile, srcName string) {
-	found := false
-	for _, info := range zu.Files() {
-		if info.Name() == ft.Name {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("%s: %s is not found", srcName, ft.Name)
+func updateReadTestFile(t *testing.T, zu *Updater, ft ZipTestFile) {
+	files := zu.Files()
+	index := sort.Search(len(files), func(i int) bool {
+		return files[i].Name() == ft.Name
+	})
+	if index == -1 {
+		t.Errorf("%s is not found", ft.Name)
 		return
 	}
 
 	r, err := zu.Open(ft.Name)
 	if err != nil {
-		t.Errorf("%s - %s: Open error=%v", srcName, ft.Name, err)
+		t.Errorf("%s: Open error=%v", ft.Name, err)
 		return
 	}
 
 	var b bytes.Buffer
 	_, err = io.Copy(&b, r)
 	if err != nil {
-		t.Errorf("%s - %s: Read error=%v", srcName, ft.Name, err)
+		t.Errorf("%s: Read error=%v", ft.Name, err)
 		return
 	}
 	r.Close()
@@ -103,13 +101,12 @@ func updateReadTestFile(t *testing.T, zu *Updater, ft ZipTestFile, srcName strin
 	}
 
 	if b.Len() != len(c) {
-		t.Errorf("%s - %s: len=%d, want %d", srcName, ft.Name, b.Len(), len(c))
+		t.Errorf("%s: len=%d, want %d", ft.Name, b.Len(), len(c))
 		return
 	}
-
 	for i, b := range b.Bytes() {
 		if b != c[i] {
-			t.Errorf("%s - %s: content[%d]=%q want %q", srcName, ft.Name, i, b, c[i])
+			t.Errorf("%s: content[%d]=%q want %q", ft.Name, i, b, c[i])
 			return
 		}
 	}
