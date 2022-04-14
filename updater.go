@@ -2,16 +2,20 @@ package zip
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/fs"
+
+	"golang.org/x/exp/slices"
 )
 
 // Updater implements a zip file updater.
 type Updater struct {
-	zr    *Reader
-	zw    *Writer
-	buf   *bytes.Buffer
-	files []fs.FileInfo
+	zr      *Reader
+	zw      *Writer
+	buf     *bytes.Buffer
+	files   []fs.FileInfo
+	headers map[string]fileRWHeader
 }
 
 // NewUpdater returns a new Updater reading from r, which is assumed to
@@ -38,7 +42,16 @@ func NewUpdater(r io.ReaderAt, size int64) (*Updater, error) {
 
 // Open returns a fs.File that provides access to the contents of name's file.
 func (z *Updater) Open(name string) (fs.File, error) {
-	return z.zr.Open(name)
+	header, ok := z.headers[name]
+	if !ok {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+
+	if header.existInReader {
+		return z.zr.Open(name)
+	}
+
+	return nil, fmt.Errorf("unimplemented")
 }
 
 // Create returns a WriteCloser to which the file contents should be written.
@@ -85,33 +98,48 @@ func (z *Updater) SaveAs(w io.Writer) error {
 	}
 
 	ow := NewWriter(w)
-	for _, f := range z.zr.File {
-		header := f.FileHeader
-		fw, err := ow.CreateRaw(&header)
-		if err != nil {
-			return err
-		}
-		fr, err := f.OpenRaw()
-		if err != nil {
-			return err
-		}
-		io.Copy(fw, fr)
-	}
+	defer ow.Close()
 
 	br, err := NewReader(bytes.NewReader(z.buf.Bytes()), int64(z.buf.Len()))
 	if err != nil {
 		return err
 	}
-	for _, f := range br.File {
-		header := f.FileHeader
-		fw, err := ow.CreateRaw(&header)
+
+	for _, f := range z.files {
+		name := f.Name()
+		header := z.headers[name]
+
+		fw, err := ow.CreateRaw(header.FileHeader)
 		if err != nil {
 			return err
 		}
-		fr, err := f.OpenRaw()
+
+		var zr *Reader
+		if header.existInReader {
+			zr = z.zr
+		} else {
+			zr = br
+		}
+
+		index := -1
+		headerOffset := int64(-1)
+		for i, zf := range zr.File {
+			if zf.Name != name {
+				continue
+			}
+			if headerOffset < zf.headerOffset {
+				headerOffset = zf.headerOffset
+				index = i
+			}
+		}
+		if index == -1 {
+			return fmt.Errorf("BUG: %s is not found", name)
+		}
+		fr, err := zr.File[index].OpenRaw()
 		if err != nil {
 			return err
 		}
+
 		_, err = io.Copy(fw, fr)
 		if err != nil {
 			return err
@@ -132,6 +160,7 @@ func (z *Updater) Discard() error {
 	z.zw = nil
 	z.buf = nil
 	z.files = nil
+	z.headers = nil
 	return nil
 }
 
@@ -149,11 +178,17 @@ func (z *Updater) initFiles() error {
 	z.zr.initFileList()
 
 	z.files = make([]fs.FileInfo, len(z.zr.File))
+	z.headers = make(map[string]fileRWHeader)
 	for i, f := range z.zr.File {
 		name := f.FileHeader.Name
 		e := z.zr.openLookup(name)
 		z.files[i] = e.stat()
+		z.headers[name] = fileRWHeader{
+			FileHeader:    &f.FileHeader,
+			existInReader: true,
+		}
 	}
+
 	return nil
 }
 
@@ -168,19 +203,39 @@ func (w *fileWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (w *fileWriteCloser) Close() error {
+	var info fs.FileInfo
 	if fw, ok := w.w.(*fileWriter); ok {
 		if err := fw.close(); err != nil {
 			return err
 		}
-		info := headerFileInfo{w.header}
-		w.parent.files = append(w.parent.files, info)
+		info = headerFileInfo{w.header}
 	} else {
-		info := &fileListEntry{
+		info = &fileListEntry{
 			name:  w.header.Name,
 			file:  nil,
 			isDir: true,
 		}
-		w.parent.files = append(w.parent.files, info)
+	}
+
+	if _, ok := w.parent.headers[w.header.Name]; ok {
+		i := slices.IndexFunc(w.parent.files, func(f fs.FileInfo) bool {
+			return f.Name() == w.header.Name
+		})
+		if i == -1 {
+			return fmt.Errorf("BUG: %s is not exist in the temporary or read file.", w.header.Name)
+		}
+		w.parent.files = append(w.parent.files[:i], w.parent.files[i+1:]...)
+	}
+
+	w.parent.files = append(w.parent.files, info)
+	w.parent.headers[w.header.Name] = fileRWHeader{
+		FileHeader:    w.header,
+		existInReader: false,
 	}
 	return nil
+}
+
+type fileRWHeader struct {
+	*FileHeader
+	existInReader bool
 }

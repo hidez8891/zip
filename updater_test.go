@@ -3,10 +3,12 @@ package zip
 import (
 	"bytes"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"testing"
+
+	"golang.org/x/exp/slices"
 )
 
 type UpdaterTest struct {
@@ -50,6 +52,37 @@ var updateTests = []UpdaterTest{
 			},
 		},
 	},
+	{
+		Name: "test.zip",
+		AppendFile: []WriteTest{
+			{
+				Name: "foo",
+				Data: []byte("Rabbits."),
+			},
+			{
+				Name: "foo",
+				Data: []byte("Gophers."), // overwrite
+			},
+			{
+				Name: "test.txt",
+				Data: []byte("This is a overwrite text file.\n"), // overwrite
+			},
+		},
+		ResultFile: []ZipTestFile{
+			{
+				Name: "gophercolor16x16.png",
+				File: "gophercolor16x16.png",
+			},
+			{
+				Name:    "foo",
+				Content: []byte("Gophers."), // overwrite
+			},
+			{
+				Name:    "test.txt",
+				Content: []byte("This is a overwrite text file.\n"), // overwrite
+			},
+		},
+	},
 }
 
 func TestUpdater(t *testing.T) {
@@ -80,38 +113,43 @@ func updateTestZip(t *testing.T, zt UpdaterTest) {
 		return
 	}
 	defer zu.Discard()
-	if len(zu.Files()) != len(zt.BaseFile) {
-		t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.BaseFile))
-	}
-	for _, ft := range zt.BaseFile {
-		updateReadTestFile(t, zu, &ft)
+
+	if zt.BaseFile != nil {
+		if len(zu.Files()) != len(zt.BaseFile) {
+			t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.BaseFile))
+		}
+		for _, ft := range zt.BaseFile {
+			updateReadTestFile(t, zu, &ft)
+		}
 	}
 
-	b := new(bytes.Buffer)
-	for _, ft := range zt.AppendFile {
-		updateWriteTestFile(t, zu, &ft)
-	}
-	if err := zu.SaveAs(b); err != nil {
-		t.Fatalf("SaveAs error=%v", err)
-	}
+	if zt.AppendFile != nil && zt.ResultFile != nil {
+		b := new(bytes.Buffer)
+		for _, ft := range zt.AppendFile {
+			updateWriteTestFile(t, zu, &ft)
+		}
+		if err := zu.SaveAs(b); err != nil {
+			t.Fatalf("SaveAs error=%v", err)
+		}
 
-	zr, err := NewUpdater(bytes.NewReader(b.Bytes()), int64(b.Len()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer zr.Discard()
-	if len(zr.Files()) != len(zt.ResultFile) {
-		t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.BaseFile))
-	}
-	for _, ft := range zt.BaseFile {
-		updateReadTestFile(t, zu, &ft)
+		zr, err := NewUpdater(bytes.NewReader(b.Bytes()), int64(b.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer zr.Discard()
+		if len(zr.Files()) != len(zt.ResultFile) {
+			t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.BaseFile))
+		}
+		for _, ft := range zt.BaseFile {
+			updateReadTestFile(t, zu, &ft)
+		}
 	}
 }
 
 func updateReadTestFile(t *testing.T, zu *Updater, ft *ZipTestFile) {
 	files := zu.Files()
-	index := sort.Search(len(files), func(i int) bool {
-		return files[i].Name() == ft.Name
+	index := slices.IndexFunc(files, func(f fs.FileInfo) bool {
+		return f.Name() == ft.Name
 	})
 	if index == -1 {
 		t.Errorf("%s is not found", ft.Name)
