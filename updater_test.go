@@ -93,6 +93,79 @@ func TestUpdater(t *testing.T) {
 	}
 }
 
+func TestUpdaterUpdateFile(t *testing.T) {
+	inbuf := new(bytes.Buffer)
+	func() {
+		zw := NewWriter(inbuf)
+		w, err := zw.Create("test.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte("Hello")); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	outbuf := new(bytes.Buffer)
+	func() {
+		zu, err := NewUpdater(bytes.NewReader(inbuf.Bytes()), int64(inbuf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer zu.Discard()
+
+		r, w, err := zu.Update("test.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+
+		if _, err := io.Copy(w, r); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(" World")); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := zu.SaveAs(outbuf); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	func() {
+		expect := "Hello World"
+
+		zr, err := NewReader(bytes.NewReader(outbuf.Bytes()), int64(outbuf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := zr.Open("test.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+
+		buf := new(bytes.Buffer)
+		if _, err := io.Copy(buf, r); err != nil {
+			t.Fatal(err)
+		}
+		if buf.Len() != len(expect) {
+			t.Fatalf("file size=%d, want %d", buf.Len(), len(expect))
+		}
+		for i, b := range buf.Bytes() {
+			if b != expect[i] {
+				t.Errorf("file content[%d]=%q want %q", i, b, expect[i])
+				return
+			}
+		}
+	}()
+}
+
 func updateTestZip(t *testing.T, zt UpdaterTest) {
 	path := filepath.Join("testdata", zt.Name)
 	info, err := os.Stat(path)

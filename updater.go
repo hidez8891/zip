@@ -76,9 +76,21 @@ func (z *Updater) Create(name string) (io.WriteCloser, error) {
 	return wc, nil
 }
 
-// Update returns a WriteCloser to which the file contents should be overwritten.
-func (z *Updater) Update(name string) (io.WriteCloser, error) {
-	return nil, nil
+// Update returns a fs.File that provides access to the contents of name's file
+// and a WriteCloser to which the file contents should be overwritten.
+func (z *Updater) Update(name string) (fs.File, io.WriteCloser, error) {
+	r, err := z.Open(name)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	w, err := z.Create(name)
+	if err != nil {
+		r.Close()
+		return nil, nil, err
+	}
+
+	return r, w, nil
 }
 
 // Rename changes the file name.
