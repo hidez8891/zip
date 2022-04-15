@@ -95,7 +95,70 @@ func (z *Updater) Update(name string) (fs.File, io.WriteCloser, error) {
 
 // Rename changes the file name.
 func (z *Updater) Rename(oldName, newName string) error {
-	return nil
+	oldHeader, ok := z.headers[oldName]
+	if !ok {
+		return &fs.PathError{Op: "rename", Path: oldName, Err: fs.ErrNotExist}
+	}
+	if _, ok := z.headers[newName]; ok {
+		return fmt.Errorf("invalid duplicate file name")
+	}
+
+	if oldHeader.existInReader {
+		index := -1
+		for i, zf := range z.zr.File {
+			if zf.Name == oldName {
+				index = i
+				break
+			}
+		}
+		if index == -1 {
+			return fmt.Errorf("BUG: %s is not found", oldName)
+		}
+		fr, err := z.zr.File[index].OpenRaw()
+		if err != nil {
+			return err
+		}
+
+		h := &FileHeader{
+			Name:               newName,
+			Method:             oldHeader.Method,
+			Flags:              oldHeader.Flags,
+			CRC32:              oldHeader.CRC32,
+			CompressedSize64:   oldHeader.CompressedSize64,
+			UncompressedSize64: oldHeader.UncompressedSize64,
+		}
+
+		fw, err := z.zw.CreateRaw(h)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(fw, fr); err != nil {
+			return err
+		}
+
+		var info fs.FileInfo
+		if _, ok := fw.(*fileWriter); ok {
+			info = headerFileInfo{h}
+		} else {
+			info = &fileListEntry{
+				name:  h.Name,
+				file:  nil,
+				isDir: true,
+			}
+		}
+
+		if err := z.Delete(oldName); err != nil {
+			return err
+		}
+		z.files = append(z.files, info)
+		z.headers[newName] = fileRWHeader{
+			FileHeader:    h,
+			existInReader: false,
+		}
+		return nil
+	}
+
+	return fmt.Errorf("unimplemented")
 }
 
 // Delete deletes the file.

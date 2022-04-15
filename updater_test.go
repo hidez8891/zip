@@ -15,6 +15,7 @@ type UpdaterTest struct {
 	Name       string
 	BaseFile   []ZipTestFile
 	AppendFile []WriteTest
+	RenameFile [][]string
 	DeleteFile []string
 	ResultFile []ZipTestFile
 }
@@ -32,6 +33,9 @@ var updateTests = []UpdaterTest{
 				File: "gophercolor16x16.png",
 			},
 		},
+	},
+	{
+		Name: "test.zip",
 		AppendFile: []WriteTest{
 			{
 				Name: "foo",
@@ -90,6 +94,22 @@ var updateTests = []UpdaterTest{
 			"test.txt",
 		},
 		ResultFile: []ZipTestFile{
+			{
+				Name: "gophercolor16x16.png",
+				File: "gophercolor16x16.png",
+			},
+		},
+	},
+	{
+		Name: "test.zip",
+		RenameFile: [][]string{
+			{"test.txt", "test2.txt"},
+		},
+		ResultFile: []ZipTestFile{
+			{
+				Name:    "test2.txt",
+				Content: []byte("This is a test text file.\n"),
+			},
 			{
 				Name: "gophercolor16x16.png",
 				File: "gophercolor16x16.png",
@@ -215,6 +235,13 @@ func updateTestZip(t *testing.T, zt UpdaterTest) {
 		if zt.AppendFile != nil {
 			for _, ft := range zt.AppendFile {
 				updateWriteTestFile(t, zu, &ft)
+			}
+		}
+		if zt.RenameFile != nil {
+			for _, rn := range zt.RenameFile {
+				if err := zu.Rename(rn[0], rn[1]); err != nil {
+					t.Fatalf("Rename error=%v", err)
+				}
 			}
 		}
 		if zt.DeleteFile != nil {
