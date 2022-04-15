@@ -100,6 +100,19 @@ func (z *Updater) Rename(oldName, newName string) error {
 
 // Delete deletes the file.
 func (z *Updater) Delete(name string) error {
+	if _, ok := z.headers[name]; !ok {
+		return &fs.PathError{Op: "delete", Path: name, Err: fs.ErrNotExist}
+	}
+
+	i := slices.IndexFunc(z.files, func(f fs.FileInfo) bool {
+		return f.Name() == name
+	})
+	if i == -1 {
+		return fmt.Errorf("BUG: %s is not exist in the temporary or read file.", name)
+	}
+	z.files = append(z.files[:i], z.files[i+1:]...)
+	delete(z.headers, name)
+
 	return nil
 }
 

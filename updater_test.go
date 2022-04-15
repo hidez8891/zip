@@ -15,6 +15,7 @@ type UpdaterTest struct {
 	Name       string
 	BaseFile   []ZipTestFile
 	AppendFile []WriteTest
+	DeleteFile []string
 	ResultFile []ZipTestFile
 }
 
@@ -80,6 +81,18 @@ var updateTests = []UpdaterTest{
 			{
 				Name:    "test.txt",
 				Content: []byte("This is a overwrite text file.\n"), // overwrite
+			},
+		},
+	},
+	{
+		Name: "test.zip",
+		DeleteFile: []string{
+			"test.txt",
+		},
+		ResultFile: []ZipTestFile{
+			{
+				Name: "gophercolor16x16.png",
+				File: "gophercolor16x16.png",
 			},
 		},
 	},
@@ -196,10 +209,20 @@ func updateTestZip(t *testing.T, zt UpdaterTest) {
 		}
 	}
 
-	if zt.AppendFile != nil && zt.ResultFile != nil {
+	if zt.ResultFile != nil {
 		b := new(bytes.Buffer)
-		for _, ft := range zt.AppendFile {
-			updateWriteTestFile(t, zu, &ft)
+
+		if zt.AppendFile != nil {
+			for _, ft := range zt.AppendFile {
+				updateWriteTestFile(t, zu, &ft)
+			}
+		}
+		if zt.DeleteFile != nil {
+			for _, name := range zt.DeleteFile {
+				if err := zu.Delete(name); err != nil {
+					t.Fatalf("Delete error=%v", err)
+				}
+			}
 		}
 		if err := zu.SaveAs(b); err != nil {
 			t.Fatalf("SaveAs error=%v", err)
