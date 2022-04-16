@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func createWriter(w io.Writer, fh *FileHeader) (io.Writer, error) {
+func createWriter(w io.Writer, fh *FileHeader) (io.WriteCloser, error) {
 	utf8Valid1, utf8Require1 := detectUTF8(fh.Name)
 	utf8Valid2, utf8Require2 := detectUTF8(fh.Comment)
 	switch {
@@ -24,8 +24,8 @@ func createWriter(w io.Writer, fh *FileHeader) (io.Writer, error) {
 	}
 
 	var (
-		ow io.Writer
-		fw *fileWriter
+		ow io.WriteCloser
+		fw *fileWriteCloser
 	)
 	h := &header{
 		FileHeader: fh,
@@ -42,14 +42,16 @@ func createWriter(w io.Writer, fh *FileHeader) (io.Writer, error) {
 		fh.UncompressedSize = 0
 		fh.UncompressedSize64 = 0
 
-		ow = dirWriter{}
+		ow = dirWriteCloser{}
 	} else {
 		fh.Flags |= 0x8 // we will write a data descriptor
 
-		fw = &fileWriter{
-			zipw:      w,
-			compCount: &countWriter{w: w},
-			crc32:     crc32.NewIEEE(),
+		fw = &fileWriteCloser{
+			fileWriter{
+				zipw:      w,
+				compCount: &countWriter{w: w},
+				crc32:     crc32.NewIEEE(),
+			},
 		}
 		comp := compressor(fh.Method)
 		if comp == nil {
@@ -67,23 +69,18 @@ func createWriter(w io.Writer, fh *FileHeader) (io.Writer, error) {
 	return ow, nil
 }
 
-func createRawWriter(w io.Writer, fh *FileHeader) (io.Writer, error) {
-	fh.CompressedSize = uint32(min64(fh.CompressedSize64, uint32max))
-	fh.UncompressedSize = uint32(min64(fh.UncompressedSize64, uint32max))
+type dirWriteCloser struct {
+	dirWriter
+}
 
-	h := &header{
-		FileHeader: fh,
-		offset:     0,
-		raw:        true,
-	}
+func (dirWriteCloser) Close() error {
+	return nil
+}
 
-	if strings.HasSuffix(fh.Name, "/") {
-		return dirWriter{}, nil
-	}
+type fileWriteCloser struct {
+	fileWriter
+}
 
-	fw := &fileWriter{
-		header: h,
-		zipw:   w,
-	}
-	return fw, nil
+func (f *fileWriteCloser) Close() error {
+	return f.close()
 }

@@ -233,7 +233,7 @@ type updaterFile struct {
 }
 
 type fileUpdaterWriteCloser struct {
-	w      io.Writer
+	w      io.WriteCloser
 	bw     *bytes.Buffer
 	header *FileHeader
 	parent *Updater
@@ -244,10 +244,8 @@ func (w *fileUpdaterWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (w *fileUpdaterWriteCloser) Close() error {
-	if fw, ok := w.w.(*fileWriter); ok {
-		if err := fw.close(); err != nil {
-			return err
-		}
+	if err := w.w.Close(); err != nil {
+		return err
 	}
 
 	i := w.parent.findFileIndex(w.header.Name)
