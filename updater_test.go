@@ -261,10 +261,10 @@ func updateTestZip(t *testing.T, zt UpdaterTest) {
 		}
 		defer zr.Discard()
 		if len(zr.Files()) != len(zt.ResultFile) {
-			t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.BaseFile))
+			t.Fatalf("file count=%d, want %d", len(zr.Files()), len(zt.ResultFile))
 		}
-		for _, ft := range zt.BaseFile {
-			updateReadTestFile(t, zu, &ft)
+		for _, ft := range zt.ResultFile {
+			updateReadTestFile(t, zr, &ft)
 		}
 	}
 }
