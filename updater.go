@@ -11,11 +11,8 @@ import (
 
 // Updater implements a zip file updater.
 type Updater struct {
-	zr      *Reader
-	zw      *Writer
-	buf     *bytes.Buffer
-	files   []fs.FileInfo
-	headers map[string]fileRWHeader
+	zr    *Reader
+	files []*updaterFile
 }
 
 // NewUpdater returns a new Updater reading from r, which is assumed to
@@ -26,12 +23,8 @@ func NewUpdater(r io.ReaderAt, size int64) (*Updater, error) {
 		return nil, err
 	}
 
-	buf := new(bytes.Buffer)
-	zw := NewWriter(buf)
 	zu := &Updater{
-		zr:  zr,
-		zw:  zw,
-		buf: buf,
+		zr: zr,
 	}
 	if err := zu.initFiles(); err != nil {
 		return nil, err
@@ -42,12 +35,13 @@ func NewUpdater(r io.ReaderAt, size int64) (*Updater, error) {
 
 // Open returns a fs.File that provides access to the contents of name's file.
 func (z *Updater) Open(name string) (fs.File, error) {
-	header, ok := z.headers[name]
-	if !ok {
+	i := z.findFileIndex(name)
+	if i == -1 {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 	}
 
-	if header.existInReader {
+	file := z.files[i]
+	if file.existInReader {
 		return z.zr.Open(name)
 	}
 
@@ -62,17 +56,20 @@ func (z *Updater) Create(name string) (io.WriteCloser, error) {
 		Name:   name,
 		Method: Deflate,
 	}
+	bw := new(bytes.Buffer)
 
-	w, err := z.zw.CreateHeader(header)
+	w, err := createWriter(bw, header)
 	if err != nil {
 		return nil, err
 	}
 
-	wc := &fileWriteCloser{
+	wc := &fileUpdaterWriteCloser{
 		w:      w,
+		bw:     bw,
 		header: header,
 		parent: z,
 	}
+
 	return wc, nil
 }
 
@@ -95,66 +92,39 @@ func (z *Updater) Update(name string) (fs.File, io.WriteCloser, error) {
 
 // Rename changes the file name.
 func (z *Updater) Rename(oldName, newName string) error {
-	oldHeader, ok := z.headers[oldName]
-	if !ok {
+	i := z.findFileIndex(oldName)
+	if i == -1 {
 		return &fs.PathError{Op: "rename", Path: oldName, Err: fs.ErrNotExist}
 	}
-	if _, ok := z.headers[newName]; ok {
-		return fmt.Errorf("invalid duplicate file name")
+	if j := z.findFileIndex(newName); j > -1 {
+		return fmt.Errorf("invalid duplicate file name: %q", newName)
 	}
 
-	if oldHeader.existInReader {
-		index := -1
-		for i, zf := range z.zr.File {
-			if zf.Name == oldName {
-				index = i
-				break
-			}
-		}
-		if index == -1 {
-			return fmt.Errorf("BUG: %s is not found", oldName)
-		}
-		fr, err := z.zr.File[index].OpenRaw()
+	file := z.files[i]
+	if file.existInReader {
+		fr, err := openRawReader(z.zr.r, file.dataOffset, file.header)
 		if err != nil {
 			return err
 		}
 
-		h := &FileHeader{
-			Name:               newName,
-			Method:             oldHeader.Method,
-			Flags:              oldHeader.Flags,
-			CRC32:              oldHeader.CRC32,
-			CompressedSize64:   oldHeader.CompressedSize64,
-			UncompressedSize64: oldHeader.UncompressedSize64,
-		}
-
-		fw, err := z.zw.CreateRaw(h)
-		if err != nil {
+		buf := new(bytes.Buffer)
+		if _, err := io.Copy(buf, fr); err != nil {
 			return err
-		}
-		if _, err := io.Copy(fw, fr); err != nil {
-			return err
-		}
-
-		var info fs.FileInfo
-		if _, ok := fw.(*fileWriter); ok {
-			info = headerFileInfo{h}
-		} else {
-			info = &fileListEntry{
-				name:  h.Name,
-				file:  nil,
-				isDir: true,
-			}
 		}
 
 		if err := z.Delete(oldName); err != nil {
 			return err
 		}
-		z.files = append(z.files, info)
-		z.headers[newName] = fileRWHeader{
-			FileHeader:    h,
-			existInReader: false,
+
+		header := file.header
+		header.Name = newName
+
+		file2 := &updaterFile{
+			existInReader:  false,
+			header:         header,
+			compressedData: buf.Bytes(),
 		}
+		z.files = append(z.files, file2)
 		return nil
 	}
 
@@ -163,67 +133,33 @@ func (z *Updater) Rename(oldName, newName string) error {
 
 // Delete deletes the file.
 func (z *Updater) Delete(name string) error {
-	if _, ok := z.headers[name]; !ok {
+	i := z.findFileIndex(name)
+	if i == -1 {
 		return &fs.PathError{Op: "delete", Path: name, Err: fs.ErrNotExist}
 	}
 
-	i := slices.IndexFunc(z.files, func(f fs.FileInfo) bool {
-		return f.Name() == name
-	})
-	if i == -1 {
-		return fmt.Errorf("BUG: %s is not exist in the temporary or read file.", name)
-	}
 	z.files = append(z.files[:i], z.files[i+1:]...)
-	delete(z.headers, name)
-
 	return nil
 }
 
 // SaveAs saves the updated zip file to w.
 func (z *Updater) SaveAs(w io.Writer) error {
-	if err := z.zw.Close(); err != nil {
-		return err
-	}
-
 	ow := NewWriter(w)
 	defer ow.Close()
 
-	br, err := NewReader(bytes.NewReader(z.buf.Bytes()), int64(z.buf.Len()))
-	if err != nil {
-		return err
-	}
-
 	for _, f := range z.files {
-		name := f.Name()
-		header := z.headers[name]
-
-		fw, err := ow.CreateRaw(header.FileHeader)
-		if err != nil {
-			return err
-		}
-
-		var zr *Reader
-		if header.existInReader {
-			zr = z.zr
+		var fr io.Reader
+		if f.existInReader {
+			var err error
+			fr, err = openRawReader(z.zr.r, f.dataOffset, f.header)
+			if err != nil {
+				return err
+			}
 		} else {
-			zr = br
+			fr = bytes.NewReader(f.compressedData)
 		}
 
-		index := -1
-		headerOffset := int64(-1)
-		for i, zf := range zr.File {
-			if zf.Name != name {
-				continue
-			}
-			if headerOffset < zf.headerOffset {
-				headerOffset = zf.headerOffset
-				index = i
-			}
-		}
-		if index == -1 {
-			return fmt.Errorf("BUG: %s is not found", name)
-		}
-		fr, err := zr.File[index].OpenRaw()
+		fw, err := ow.CreateRaw(&f.header)
 		if err != nil {
 			return err
 		}
@@ -242,13 +178,8 @@ func (z *Updater) SaveAs(w io.Writer) error {
 
 // Discard discards the changes and ends editing.
 func (z *Updater) Discard() error {
-	z.zw.Close()
-
 	z.zr = nil
-	z.zw = nil
-	z.buf = nil
 	z.files = nil
-	z.headers = nil
 	return nil
 }
 
@@ -259,71 +190,77 @@ func (z *Updater) Close() error {
 
 // Files returns a list of file information in the zip file.
 func (z *Updater) Files() []fs.FileInfo {
-	return z.files[:]
+	fis := make([]fs.FileInfo, len(z.files))
+	for i, f := range z.files {
+		fis[i] = f.header.FileInfo()
+	}
+	return fis
 }
 
 func (z *Updater) initFiles() error {
 	z.zr.initFileList()
 
-	z.files = make([]fs.FileInfo, len(z.zr.File))
-	z.headers = make(map[string]fileRWHeader)
+	z.files = make([]*updaterFile, len(z.zr.File))
 	for i, f := range z.zr.File {
-		name := f.FileHeader.Name
-		e := z.zr.openLookup(name)
-		z.files[i] = e.stat()
-		z.headers[name] = fileRWHeader{
-			FileHeader:    &f.FileHeader,
+		offset, err := f.findBodyOffset()
+		if err != nil {
+			return err
+		}
+		offset += f.headerOffset
+
+		z.files[i] = &updaterFile{
 			existInReader: true,
+			header:        f.FileHeader,
+			dataOffset:    offset,
 		}
 	}
 
 	return nil
 }
 
-type fileWriteCloser struct {
+func (z *Updater) findFileIndex(name string) int {
+	i := slices.IndexFunc(z.files, func(f *updaterFile) bool {
+		return f.header.Name == name
+	})
+	return i
+}
+
+type updaterFile struct {
+	existInReader  bool
+	header         FileHeader
+	dataOffset     int64
+	compressedData []byte
+}
+
+type fileUpdaterWriteCloser struct {
 	w      io.Writer
+	bw     *bytes.Buffer
 	header *FileHeader
 	parent *Updater
 }
 
-func (w *fileWriteCloser) Write(p []byte) (int, error) {
+func (w *fileUpdaterWriteCloser) Write(p []byte) (int, error) {
 	return w.w.Write(p)
 }
 
-func (w *fileWriteCloser) Close() error {
-	var info fs.FileInfo
+func (w *fileUpdaterWriteCloser) Close() error {
 	if fw, ok := w.w.(*fileWriter); ok {
 		if err := fw.close(); err != nil {
 			return err
 		}
-		info = headerFileInfo{w.header}
-	} else {
-		info = &fileListEntry{
-			name:  w.header.Name,
-			file:  nil,
-			isDir: true,
-		}
 	}
 
-	if _, ok := w.parent.headers[w.header.Name]; ok {
-		i := slices.IndexFunc(w.parent.files, func(f fs.FileInfo) bool {
-			return f.Name() == w.header.Name
-		})
-		if i == -1 {
-			return fmt.Errorf("BUG: %s is not exist in the temporary or read file.", w.header.Name)
-		}
+	i := w.parent.findFileIndex(w.header.Name)
+	if i > -1 {
 		w.parent.files = append(w.parent.files[:i], w.parent.files[i+1:]...)
 	}
 
-	w.parent.files = append(w.parent.files, info)
-	w.parent.headers[w.header.Name] = fileRWHeader{
-		FileHeader:    w.header,
-		existInReader: false,
+	file := &updaterFile{
+		existInReader:  false,
+		header:         *w.header,
+		compressedData: w.bw.Bytes(),
 	}
-	return nil
-}
+	w.parent.files = append(w.parent.files, file)
 
-type fileRWHeader struct {
-	*FileHeader
-	existInReader bool
+	return nil
 }
