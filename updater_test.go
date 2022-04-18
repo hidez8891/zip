@@ -3,12 +3,9 @@ package zip
 import (
 	"bytes"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"golang.org/x/exp/slices"
 )
 
 type updateInst int
@@ -143,12 +140,13 @@ var updateTests = []UpdaterTest{
 		},
 		ResultFile: []ZipTestFile{
 			{
-				Name:    "test2.txt",
-				Content: []byte("This is a test text file.\n"),
-			},
-			{
 				Name: "gophercolor16x16.png",
 				File: "gophercolor16x16.png",
+			},
+			{
+				// renamed files are moved to the end.
+				Name:    "test2.txt",
+				Content: []byte("This is a test text file.\n"),
 			},
 		},
 	},
@@ -218,8 +216,8 @@ func testUpdateZip(t *testing.T, zt UpdaterTest) {
 		if len(zu.Files()) != len(zt.OriginalFile) {
 			t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.OriginalFile))
 		}
-		for _, ft := range zt.OriginalFile {
-			testUpdateReadFile(t, zu, &ft)
+		for i, ft := range zt.OriginalFile {
+			testUpdateReadFile(t, zu, i, &ft)
 		}
 	}
 
@@ -264,20 +262,16 @@ func testUpdateZip(t *testing.T, zt UpdaterTest) {
 		if len(zr.Files()) != len(zt.ResultFile) {
 			t.Fatalf("file count=%d, want %d", len(zr.Files()), len(zt.ResultFile))
 		}
-		for _, ft := range zt.ResultFile {
-			testUpdateReadFile(t, zr, &ft)
+		for i, ft := range zt.ResultFile {
+			testUpdateReadFile(t, zr, i, &ft)
 		}
 	}
 }
 
-func testUpdateReadFile(t *testing.T, zu *Updater, ft *ZipTestFile) {
-	files := zu.Files()
-	index := slices.IndexFunc(files, func(f fs.FileInfo) bool {
-		return f.Name() == ft.Name
-	})
-	if index == -1 {
-		t.Errorf("%s is not found", ft.Name)
-		return
+func testUpdateReadFile(t *testing.T, zu *Updater, index int, ft *ZipTestFile) {
+	file := zu.Files()[index]
+	if file.Name() != ft.Name {
+		t.Fatalf("file name %q, want %q", file.Name(), ft.Name)
 	}
 
 	r, err := zu.Open(ft.Name)
