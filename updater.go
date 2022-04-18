@@ -45,7 +45,8 @@ func (z *Updater) Open(name string) (fs.File, error) {
 		return z.zr.Open(name)
 	}
 
-	return nil, fmt.Errorf("unimplemented")
+	rb := bytes.NewReader(file.compressedData)
+	return openReader(rb, 0, file.header)
 }
 
 // Create returns a WriteCloser to which the file contents should be written.
