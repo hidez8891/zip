@@ -11,19 +11,33 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+type updateInst int
+
+const (
+	updaterWriteID updateInst = iota
+	updaterRenameID
+	updaterDeleteID
+)
+
+type updaterCmd struct {
+	id updateInst
+
+	writes  []WriteTest
+	renames [][]string
+	deletes []string
+}
+
 type UpdaterTest struct {
-	Name       string
-	BaseFile   []ZipTestFile
-	AppendFile []WriteTest
-	RenameFile [][]string
-	DeleteFile []string
-	ResultFile []ZipTestFile
+	Name         string
+	OriginalFile []ZipTestFile
+	Commands     []*updaterCmd
+	ResultFile   []ZipTestFile
 }
 
 var updateTests = []UpdaterTest{
 	{
 		Name: "test.zip",
-		BaseFile: []ZipTestFile{
+		OriginalFile: []ZipTestFile{
 			{
 				Name:    "test.txt",
 				Content: []byte("This is a test text file.\n"),
@@ -36,10 +50,15 @@ var updateTests = []UpdaterTest{
 	},
 	{
 		Name: "test.zip",
-		AppendFile: []WriteTest{
+		Commands: []*updaterCmd{
 			{
-				Name: "foo",
-				Data: []byte("Rabbits, guinea pigs, gophers, marsupial rats, and quolls."),
+				id: updaterWriteID,
+				writes: []WriteTest{
+					{
+						Name: "foo",
+						Data: []byte("Rabbits, guinea pigs, gophers, marsupial rats, and quolls."),
+					},
+				},
 			},
 		},
 		ResultFile: []ZipTestFile{
@@ -59,18 +78,23 @@ var updateTests = []UpdaterTest{
 	},
 	{
 		Name: "test.zip",
-		AppendFile: []WriteTest{
+		Commands: []*updaterCmd{
 			{
-				Name: "foo",
-				Data: []byte("Rabbits."),
-			},
-			{
-				Name: "foo",
-				Data: []byte("Gophers."), // overwrite
-			},
-			{
-				Name: "test.txt",
-				Data: []byte("This is a overwrite text file.\n"), // overwrite
+				id: updaterWriteID,
+				writes: []WriteTest{
+					{
+						Name: "foo",
+						Data: []byte("Rabbits."),
+					},
+					{
+						Name: "foo",
+						Data: []byte("Gophers."), // overwrite
+					},
+					{
+						Name: "test.txt",
+						Data: []byte("This is a overwrite text file.\n"), // overwrite
+					},
+				},
 			},
 		},
 		ResultFile: []ZipTestFile{
@@ -90,8 +114,13 @@ var updateTests = []UpdaterTest{
 	},
 	{
 		Name: "test.zip",
-		DeleteFile: []string{
-			"test.txt",
+		Commands: []*updaterCmd{
+			{
+				id: updaterDeleteID,
+				deletes: []string{
+					"test.txt",
+				},
+			},
 		},
 		ResultFile: []ZipTestFile{
 			{
@@ -102,8 +131,13 @@ var updateTests = []UpdaterTest{
 	},
 	{
 		Name: "test.zip",
-		RenameFile: [][]string{
-			{"test.txt", "test2.txt"},
+		Commands: []*updaterCmd{
+			{
+				id: updaterRenameID,
+				renames: [][]string{
+					{"test.txt", "test2.txt"},
+				},
+			},
 		},
 		ResultFile: []ZipTestFile{
 			{
@@ -121,7 +155,7 @@ var updateTests = []UpdaterTest{
 func TestUpdater(t *testing.T) {
 	for _, zt := range updateTests {
 		t.Run(zt.Name, func(t *testing.T) {
-			updateTestZip(t, zt)
+			testUpdateZip(t, zt)
 		})
 	}
 }
@@ -233,7 +267,7 @@ func TestUpdaterUpdateFile(t *testing.T) {
 	zu.Discard()
 }
 
-func updateTestZip(t *testing.T, zt UpdaterTest) {
+func testUpdateZip(t *testing.T, zt UpdaterTest) {
 	path := filepath.Join("testdata", zt.Name)
 	info, err := os.Stat(path)
 	if err != nil {
@@ -254,37 +288,39 @@ func updateTestZip(t *testing.T, zt UpdaterTest) {
 	}
 	defer zu.Discard()
 
-	if zt.BaseFile != nil {
-		if len(zu.Files()) != len(zt.BaseFile) {
-			t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.BaseFile))
+	if zt.OriginalFile != nil {
+		if len(zu.Files()) != len(zt.OriginalFile) {
+			t.Fatalf("file count=%d, want %d", len(zu.Files()), len(zt.OriginalFile))
 		}
-		for _, ft := range zt.BaseFile {
-			updateReadTestFile(t, zu, &ft)
+		for _, ft := range zt.OriginalFile {
+			testUpdateReadFile(t, zu, &ft)
 		}
 	}
 
-	if zt.ResultFile != nil {
-		b := new(bytes.Buffer)
+	if zt.Commands != nil {
+		for _, cmd := range zt.Commands {
+			if cmd.id == updaterWriteID {
+				for _, ft := range cmd.writes {
+					testUpdateWriteFile(t, zu, &ft)
+				}
+			}
+			if cmd.id == updaterRenameID {
+				for _, rn := range cmd.renames {
+					if err := zu.Rename(rn[0], rn[1]); err != nil {
+						t.Fatalf("Rename error=%v", err)
+					}
+				}
+			}
+			if cmd.id == updaterDeleteID {
+				for _, name := range cmd.deletes {
+					if err := zu.Delete(name); err != nil {
+						t.Fatalf("Delete error=%v", err)
+					}
+				}
+			}
+		}
 
-		if zt.AppendFile != nil {
-			for _, ft := range zt.AppendFile {
-				updateWriteTestFile(t, zu, &ft)
-			}
-		}
-		if zt.RenameFile != nil {
-			for _, rn := range zt.RenameFile {
-				if err := zu.Rename(rn[0], rn[1]); err != nil {
-					t.Fatalf("Rename error=%v", err)
-				}
-			}
-		}
-		if zt.DeleteFile != nil {
-			for _, name := range zt.DeleteFile {
-				if err := zu.Delete(name); err != nil {
-					t.Fatalf("Delete error=%v", err)
-				}
-			}
-		}
+		b := new(bytes.Buffer)
 		if err := zu.SaveAs(b); err != nil {
 			t.Fatalf("SaveAs error=%v", err)
 		}
@@ -298,12 +334,12 @@ func updateTestZip(t *testing.T, zt UpdaterTest) {
 			t.Fatalf("file count=%d, want %d", len(zr.Files()), len(zt.ResultFile))
 		}
 		for _, ft := range zt.ResultFile {
-			updateReadTestFile(t, zr, &ft)
+			testUpdateReadFile(t, zr, &ft)
 		}
 	}
 }
 
-func updateReadTestFile(t *testing.T, zu *Updater, ft *ZipTestFile) {
+func testUpdateReadFile(t *testing.T, zu *Updater, ft *ZipTestFile) {
 	files := zu.Files()
 	index := slices.IndexFunc(files, func(f fs.FileInfo) bool {
 		return f.Name() == ft.Name
@@ -347,7 +383,7 @@ func updateReadTestFile(t *testing.T, zu *Updater, ft *ZipTestFile) {
 	}
 }
 
-func updateWriteTestFile(t *testing.T, zu *Updater, ft *WriteTest) {
+func testUpdateWriteFile(t *testing.T, zu *Updater, ft *WriteTest) {
 	w, err := zu.Create(ft.Name)
 	if err != nil {
 		t.Fatalf("%s: Create error=%v", ft.Name, err)
