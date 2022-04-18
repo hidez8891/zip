@@ -15,6 +15,7 @@ type updateInst int
 
 const (
 	updaterWriteID updateInst = iota
+	updaterAppendID
 	updaterRenameID
 	updaterDeleteID
 )
@@ -23,6 +24,7 @@ type updaterCmd struct {
 	id updateInst
 
 	writes  []WriteTest
+	appends []WriteTest
 	renames [][]string
 	deletes []string
 }
@@ -150,6 +152,37 @@ var updateTests = []UpdaterTest{
 			},
 		},
 	},
+	{
+		Name: "test.zip",
+		Commands: []*updaterCmd{
+			{
+				id: updaterAppendID,
+				appends: []WriteTest{
+					{
+						// writing from file to temp
+						Name: "test.txt",
+						Data: []byte("Hello Golang.\n"),
+					},
+					{
+						// writing from temp to temp
+						Name: "test.txt",
+						Data: []byte("Hello World.\n"),
+					},
+				},
+			},
+		},
+		ResultFile: []ZipTestFile{
+			{
+				Name: "gophercolor16x16.png",
+				File: "gophercolor16x16.png",
+			},
+			{
+				// edited files are moved to the end.
+				Name:    "test.txt",
+				Content: []byte("This is a test text file.\nHello Golang.\nHello World.\n"),
+			},
+		},
+	},
 }
 
 func TestUpdater(t *testing.T) {
@@ -158,113 +191,6 @@ func TestUpdater(t *testing.T) {
 			testUpdateZip(t, zt)
 		})
 	}
-}
-
-func TestUpdaterUpdateFile(t *testing.T) {
-	createEmptyZip := func(dst io.Writer) {
-		zw := NewWriter(dst)
-		if err := zw.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	newUpdaterFn := func(buf []byte) *Updater {
-		zu, err := NewUpdater(bytes.NewReader(buf), int64(len(buf)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return zu
-	}
-
-	saveFn := func(zu *Updater, dst io.Writer) {
-		if err := zu.SaveAs(dst); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	writeFn := func(zu *Updater, name, text string) {
-		w, err := zu.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write([]byte(text)); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	appendFn := func(zu *Updater, name, text string) {
-		r, w, err := zu.Update(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer r.Close()
-
-		if _, err := io.Copy(w, r); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write([]byte(text)); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	checkFn := func(buf []byte, name, expect string) {
-		zr, err := NewReader(bytes.NewReader(buf), int64(len(buf)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		r, err := zr.Open(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer r.Close()
-
-		b := new(bytes.Buffer)
-		if _, err := io.Copy(b, r); err != nil {
-			t.Fatal(err)
-		}
-		if b.Len() != len(expect) {
-			t.Fatalf("file size=%d, want %d", b.Len(), len(expect))
-		}
-		for i, b := range b.Bytes() {
-			if b != expect[i] {
-				t.Errorf("file content[%d]=%q want %q", i, b, expect[i])
-				return
-			}
-		}
-	}
-
-	emptyZip := new(bytes.Buffer)
-	createEmptyZip(emptyZip)
-
-	outbuf := new(bytes.Buffer)
-	zu := newUpdaterFn(emptyZip.Bytes())
-	writeFn(zu, "test.txt", "Hello") // write only
-	saveFn(zu, outbuf)
-	checkFn(outbuf.Bytes(), "test.txt", "Hello")
-	zu.Discard()
-
-	outbuf.Reset()
-	zu = newUpdaterFn(emptyZip.Bytes())
-	writeFn(zu, "test.txt", "Hello")
-	appendFn(zu, "test.txt", " Golang") // write from read area
-	saveFn(zu, outbuf)
-	checkFn(outbuf.Bytes(), "test.txt", "Hello Golang")
-	zu.Discard()
-
-	outbuf.Reset()
-	zu = newUpdaterFn(emptyZip.Bytes())
-	writeFn(zu, "test.txt", "Hello")
-	appendFn(zu, "test.txt", " Golang") // write from read area
-	appendFn(zu, "test.txt", " World")  // write from temp area
-	saveFn(zu, outbuf)
-	checkFn(outbuf.Bytes(), "test.txt", "Hello Golang World")
-	zu.Discard()
 }
 
 func testUpdateZip(t *testing.T, zt UpdaterTest) {
@@ -302,6 +228,11 @@ func testUpdateZip(t *testing.T, zt UpdaterTest) {
 			if cmd.id == updaterWriteID {
 				for _, ft := range cmd.writes {
 					testUpdateWriteFile(t, zu, &ft)
+				}
+			}
+			if cmd.id == updaterAppendID {
+				for _, ft := range cmd.appends {
+					testUpdateAppendFile(t, zu, &ft)
 				}
 			}
 			if cmd.id == updaterRenameID {
@@ -390,6 +321,24 @@ func testUpdateWriteFile(t *testing.T, zu *Updater, ft *WriteTest) {
 	}
 	defer w.Close()
 
+	_, err = w.Write(ft.Data)
+	if err != nil {
+		t.Fatalf("%s: Write error=%v", ft.Name, err)
+	}
+}
+
+func testUpdateAppendFile(t *testing.T, zu *Updater, ft *WriteTest) {
+	r, w, err := zu.Update(ft.Name)
+	if err != nil {
+		t.Fatalf("%s: Update error=%v", ft.Name, err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	_, err = io.Copy(w, r)
+	if err != nil {
+		t.Fatalf("%s: io.Copy error=%v", ft.Name, err)
+	}
 	_, err = w.Write(ft.Data)
 	if err != nil {
 		t.Fatalf("%s: Write error=%v", ft.Name, err)
