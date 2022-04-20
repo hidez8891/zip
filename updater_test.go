@@ -132,17 +132,26 @@ var updateTests = []UpdaterTest{
 		Name: "test.zip",
 		Commands: []*updaterCmd{
 			{
-				// copy from file to temp
+				id: updaterWriteID,
+				writes: []WriteTest{
+					{
+						Name: "foo.txt",
+						Data: []byte("Hello Golang World."),
+					},
+				},
+			},
+			{
+				// rename files in input.
 				id: updaterRenameID,
 				renames: [][]string{
 					{"test.txt", "test2.txt"},
 				},
 			},
 			{
-				// copy from temp to temp
+				// rename files in temp.
 				id: updaterRenameID,
 				renames: [][]string{
-					{"test2.txt", "test3.txt"},
+					{"foo.txt", "bar.txt"},
 				},
 			},
 		},
@@ -153,8 +162,13 @@ var updateTests = []UpdaterTest{
 			},
 			{
 				// renamed files are moved to the end.
-				Name:    "test3.txt",
+				Name:    "test2.txt",
 				Content: []byte("This is a test text file.\n"),
+			},
+			{
+				// renamed files are moved to the end.
+				Name:    "bar.txt",
+				Content: []byte("Hello Golang World."),
 			},
 		},
 	},
@@ -162,16 +176,25 @@ var updateTests = []UpdaterTest{
 		Name: "test.zip",
 		Commands: []*updaterCmd{
 			{
+				id: updaterWriteID,
+				writes: []WriteTest{
+					{
+						Name: "foo.txt",
+						Data: []byte("Hello World."),
+					},
+				},
+			},
+			{
 				id: updaterAppendID,
 				appends: []WriteTest{
 					{
-						// writing from file to temp
+						// append text to input.
 						Name: "test.txt",
 						Data: []byte("Hello Golang.\n"),
 					},
 					{
-						// writing from temp to temp
-						Name: "test.txt",
+						// append text to temp.
+						Name: "foo.txt",
 						Data: []byte("Hello World.\n"),
 					},
 				},
@@ -185,7 +208,12 @@ var updateTests = []UpdaterTest{
 			{
 				// edited files are moved to the end.
 				Name:    "test.txt",
-				Content: []byte("This is a test text file.\nHello Golang.\nHello World.\n"),
+				Content: []byte("This is a test text file.\nHello Golang.\n"),
+			},
+			{
+				// edited files are moved to the end.
+				Name:    "foo.txt",
+				Content: []byte("Hello World.Hello World.\n"),
 			},
 		},
 	},
