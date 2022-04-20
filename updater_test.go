@@ -132,9 +132,17 @@ var updateTests = []UpdaterTest{
 		Name: "test.zip",
 		Commands: []*updaterCmd{
 			{
+				// copy from file to temp
 				id: updaterRenameID,
 				renames: [][]string{
 					{"test.txt", "test2.txt"},
+				},
+			},
+			{
+				// copy from temp to temp
+				id: updaterRenameID,
+				renames: [][]string{
+					{"test2.txt", "test3.txt"},
 				},
 			},
 		},
@@ -145,7 +153,7 @@ var updateTests = []UpdaterTest{
 			},
 			{
 				// renamed files are moved to the end.
-				Name:    "test2.txt",
+				Name:    "test3.txt",
 				Content: []byte("This is a test text file.\n"),
 			},
 		},

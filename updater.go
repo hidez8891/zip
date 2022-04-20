@@ -113,23 +113,23 @@ func (z *Updater) Rename(oldName, newName string) error {
 			return err
 		}
 
-		if err := z.Delete(oldName); err != nil {
-			return err
-		}
-
 		header := file.header
 		header.Name = newName
 
-		file2 := &updaterFile{
+		file = &updaterFile{
 			existInReader:  false,
 			header:         header,
 			compressedData: buf.Bytes(),
 		}
-		z.files = append(z.files, file2)
-		return nil
 	}
 
-	return fmt.Errorf("unimplemented")
+	if err := z.Delete(oldName); err != nil {
+		return err
+	}
+
+	file.header.Name = newName
+	z.files = append(z.files, file)
+	return nil
 }
 
 // Delete deletes the file.
