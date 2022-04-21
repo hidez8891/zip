@@ -148,26 +148,38 @@ var updateTests = []UpdaterTest{
 				},
 			},
 			{
+				// rename files in input.
+				id: updaterRenameID,
+				renames: [][]string{
+					{"test2.txt", "test3.txt"},
+				},
+			},
+			{
 				// rename files in temp.
 				id: updaterRenameID,
 				renames: [][]string{
 					{"foo.txt", "bar.txt"},
 				},
 			},
+			{
+				// rename files in temp.
+				id: updaterRenameID,
+				renames: [][]string{
+					{"bar.txt", "baz.txt"},
+				},
+			},
 		},
 		ResultFile: []ZipTestFile{
+			{
+				Name:    "test3.txt",
+				Content: []byte("This is a test text file.\n"),
+			},
 			{
 				Name: "gophercolor16x16.png",
 				File: "gophercolor16x16.png",
 			},
 			{
-				// renamed files are moved to the end.
-				Name:    "test2.txt",
-				Content: []byte("This is a test text file.\n"),
-			},
-			{
-				// renamed files are moved to the end.
-				Name:    "bar.txt",
+				Name:    "baz.txt",
 				Content: []byte("Hello Golang World."),
 			},
 		},

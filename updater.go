@@ -102,33 +102,7 @@ func (z *Updater) Rename(oldName, newName string) error {
 	}
 
 	file := z.files[i]
-	if file.existInReader {
-		fr, err := openRawReader(z.zr.r, file.dataOffset, file.header)
-		if err != nil {
-			return err
-		}
-
-		buf := new(bytes.Buffer)
-		if _, err := io.Copy(buf, fr); err != nil {
-			return err
-		}
-
-		header := file.header
-		header.Name = newName
-
-		file = &updaterFile{
-			existInReader:  false,
-			header:         header,
-			compressedData: buf.Bytes(),
-		}
-	}
-
-	if err := z.Delete(oldName); err != nil {
-		return err
-	}
-
 	file.header.Name = newName
-	z.files = append(z.files, file)
 	return nil
 }
 
