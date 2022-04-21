@@ -223,17 +223,17 @@ func (w *fileUpdaterWriteCloser) Close() error {
 		return err
 	}
 
-	i := w.parent.findFileIndex(w.header.Name)
-	if i > -1 {
-		w.parent.files = append(w.parent.files[:i], w.parent.files[i+1:]...)
-	}
-
 	file := &updaterFile{
 		existInReader:  false,
 		header:         *w.header,
 		compressedData: w.bw.Bytes(),
 	}
-	w.parent.files = append(w.parent.files, file)
 
+	i := w.parent.findFileIndex(w.header.Name)
+	if i > -1 {
+		w.parent.files[i] = file
+	} else {
+		w.parent.files = append(w.parent.files, file)
+	}
 	return nil
 }

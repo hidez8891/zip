@@ -98,16 +98,16 @@ var updateTests = []UpdaterTest{
 		},
 		ResultFile: []ZipTestFile{
 			{
+				Name:    "test.txt",
+				Content: []byte("This is a overwrite text file.\n"), // overwrite
+			},
+			{
 				Name: "gophercolor16x16.png",
 				File: "gophercolor16x16.png",
 			},
 			{
 				Name:    "foo",
 				Content: []byte("Gophers."), // overwrite
-			},
-			{
-				Name:    "test.txt",
-				Content: []byte("This is a overwrite text file.\n"), // overwrite
 			},
 		},
 	},
@@ -214,16 +214,14 @@ var updateTests = []UpdaterTest{
 		},
 		ResultFile: []ZipTestFile{
 			{
-				Name: "gophercolor16x16.png",
-				File: "gophercolor16x16.png",
-			},
-			{
-				// edited files are moved to the end.
 				Name:    "test.txt",
 				Content: []byte("This is a test text file.\nHello Golang.\n"),
 			},
 			{
-				// edited files are moved to the end.
+				Name: "gophercolor16x16.png",
+				File: "gophercolor16x16.png",
+			},
+			{
 				Name:    "foo.txt",
 				Content: []byte("Hello World.Hello World.\n"),
 			},
