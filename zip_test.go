@@ -323,6 +323,7 @@ func TestZip64DirectoryOffset(t *testing.T) {
 			f, err := w.CreateHeader(&FileHeader{
 				Name:   filename,
 				Method: Store,
+				Flags:  0x8, //zip64 format is incomplete
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -721,23 +722,21 @@ func TestHeaderTooLongErr(t *testing.T) {
 		},
 	}
 
-	// write a zip file
-	buf := new(bytes.Buffer)
-	w := NewWriter(buf)
-
 	for _, test := range headerTests {
+		// write a zip file
+		buf := new(bytes.Buffer)
+		w := NewWriter(buf)
+
 		h := &FileHeader{
 			Name:  test.name,
 			Extra: test.extra,
 		}
-		_, err := w.CreateHeader(h)
-		if err != test.wanterr {
+		if _, err := w.CreateHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != test.wanterr {
 			t.Errorf("error=%v, want %v", err, test.wanterr)
 		}
-	}
-
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
 	}
 }
 
