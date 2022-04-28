@@ -1,6 +1,7 @@
 package zip
 
 import (
+	"errors"
 	"hash/crc32"
 	"io"
 	"strings"
@@ -44,11 +45,9 @@ func createWriter(w io.Writer, fh *FileHeader) (io.WriteCloser, error) {
 
 		ow = dirWriteCloser{}
 	} else {
-		fh.Flags |= 0x8 // we will write a data descriptor
-
 		fw = &fileWriteCloser{
 			fileWriter{
-				zipw:      w,
+				zipw:      &writeOnlyReadWriter{w},
 				compCount: &countWriter{w: w},
 				crc32:     crc32.NewIEEE(),
 			},
@@ -83,4 +82,16 @@ type fileWriteCloser struct {
 
 func (f *fileWriteCloser) Close() error {
 	return f.close()
+}
+
+type writeOnlyReadWriter struct {
+	w io.Writer
+}
+
+func (rw *writeOnlyReadWriter) Write(b []byte) (int, error) {
+	return rw.w.Write(b)
+}
+
+func (rw *writeOnlyReadWriter) Read(b []byte) (int, error) {
+	return 0, errors.New("zip: read from write-only data")
 }
