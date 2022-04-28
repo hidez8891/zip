@@ -6,6 +6,7 @@ package zip
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"hash"
@@ -75,11 +76,8 @@ func (w *Writer) SetComment(comment string) error {
 // Close finishes writing the zip file by writing the central directory.
 // It does not close the underlying writer.
 func (w *Writer) Close() error {
-	if w.last != nil && !w.last.closed {
-		if err := w.last.close(); err != nil {
-			return err
-		}
-		w.last = nil
+	if err := w.prepare(nil); err != nil {
+		return err
 	}
 	if w.closed {
 		return errors.New("zip: writer closed twice")
@@ -253,6 +251,13 @@ func (w *Writer) prepare(fh *FileHeader) error {
 		if err := w.last.close(); err != nil {
 			return err
 		}
+		if err := writeHeader(w.cw, w.last.header); err != nil {
+			return err
+		}
+		if _, err := io.Copy(w.cw, w.last.zipw); err != nil {
+			return err
+		}
+		w.last = nil
 	}
 	if len(w.dir) > 0 && w.dir[len(w.dir)-1].FileHeader == fh {
 		// See https://golang.org/issue/11144 confusion.
@@ -339,6 +344,13 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 	}
 
 	if strings.HasSuffix(fh.Name, "/") {
+		// Set dummy fileWriter to write FileHeader
+		h.raw = true
+		fw = &fileWriter{
+			zipw:   new(bytes.Buffer),
+			header: h,
+		}
+
 		// Set the compression method to Store to ensure data length is truly zero,
 		// which the writeHeader method always encodes for the size fields.
 		// This is necessary as most compression formats have non-zero lengths
@@ -354,11 +366,10 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 
 		ow = dirWriter{}
 	} else {
-		fh.Flags |= 0x8 // we will write a data descriptor
-
+		bw := new(bytes.Buffer)
 		fw = &fileWriter{
-			zipw:      w.cw,
-			compCount: &countWriter{w: w.cw},
+			zipw:      bw,
+			compCount: &countWriter{w: bw},
 			crc32:     crc32.NewIEEE(),
 		}
 		comp := w.compressor(fh.Method)
@@ -375,9 +386,7 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 		ow = fw
 	}
 	w.dir = append(w.dir, h)
-	if err := writeHeader(w.cw, h); err != nil {
-		return nil, err
-	}
+
 	// If we're creating a directory, fw is nil.
 	w.last = fw
 	return ow, nil
@@ -453,9 +462,6 @@ func (w *Writer) CreateRaw(fh *FileHeader) (io.Writer, error) {
 		raw:        true,
 	}
 	w.dir = append(w.dir, h)
-	if err := writeHeader(w.cw, h); err != nil {
-		return nil, err
-	}
 
 	if strings.HasSuffix(fh.Name, "/") {
 		w.last = nil
@@ -464,7 +470,7 @@ func (w *Writer) CreateRaw(fh *FileHeader) (io.Writer, error) {
 
 	fw := &fileWriter{
 		header: h,
-		zipw:   w.cw,
+		zipw:   new(bytes.Buffer),
 	}
 	w.last = fw
 	return fw, nil
@@ -514,7 +520,7 @@ func (dirWriter) Write(b []byte) (int, error) {
 
 type fileWriter struct {
 	*header
-	zipw      io.Writer
+	zipw      io.ReadWriter
 	rawCount  *countWriter
 	comp      io.WriteCloser
 	compCount *countWriter
@@ -552,6 +558,7 @@ func (w *fileWriter) close() error {
 	fh.UncompressedSize64 = uint64(w.rawCount.count)
 
 	if fh.isZip64() {
+		fh.Flags |= 0x8 // Must write a data descriptor
 		fh.CompressedSize = uint32max
 		fh.UncompressedSize = uint32max
 		fh.ReaderVersion = zipVersion45 // requires 4.5 - File uses ZIP64 format extensions
