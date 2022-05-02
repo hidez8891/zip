@@ -456,6 +456,49 @@ func TestWriterCopyFile(t *testing.T) {
 	}
 }
 
+func TestWriterCopyToUnusedDataDescriptor(t *testing.T) {
+	srcFile := "testdata/dd.zip"
+
+	zr, err := OpenReader(srcFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	buf := new(bytes.Buffer)
+	zw := NewWriter(buf)
+	for _, f := range zr.File {
+		fh := f.FileHeader
+		w, err := zw.CreateHeader(&fh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fh.Flags &^= 0x08 // unset DataDescriptor flag
+
+		r, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(w, r)
+		r.Close()
+	}
+	zw.Close()
+
+	// validation
+	zc, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range zc.File {
+		if zc.File[i].Name != zr.File[i].Name {
+			t.Fatalf("file name: get %q, want %q", zc.File[i].Name, zr.File[i].Name)
+		}
+		if zc.File[i].FileHeader.Flags&0x08 != 0 {
+			t.Fatalf("data descriptor falg is SET: %s", zc.File[i].Name)
+		}
+	}
+}
+
 func TestWriterCreateRaw(t *testing.T) {
 	files := []struct {
 		name             string
