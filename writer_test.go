@@ -410,6 +410,52 @@ func TestWriterCopy(t *testing.T) {
 	}
 }
 
+func TestWriterCopyFile(t *testing.T) {
+	tests := []string{
+		"testdata/dd.zip",    // use data descriptor
+		"testdata/no-dd.zip", // unuse data descriptor
+	}
+
+	for _, tt := range tests {
+		file, err := os.Open(tt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bufR := new(bytes.Buffer)
+		_, err = io.Copy(bufR, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file.Close()
+
+		zr, err := NewReader(bytes.NewReader(bufR.Bytes()), int64(bufR.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		bufW := new(bytes.Buffer)
+		zw := NewWriter(bufW)
+		for _, f := range zr.File {
+			err := zw.Copy(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		zw.Close()
+
+		byteR := bufR.Bytes()
+		byteW := bufW.Bytes()
+		if len(byteR) != len(byteW) {
+			t.Fatalf("copy file size is different: want %d, get %d", len(byteR), len(byteW))
+		}
+		for i := 0; i < len(byteR); i++ {
+			if byteR[i] != byteW[i] {
+				t.Fatalf("content[%d]=%q want %q", i, byteR[i], byteW[i])
+			}
+		}
+	}
+}
+
 func TestWriterCreateRaw(t *testing.T) {
 	files := []struct {
 		name             string
